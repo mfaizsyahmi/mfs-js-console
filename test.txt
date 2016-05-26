@@ -1,0 +1,7 @@
+echo TEST
+echo The quick brown fox jumps over the lazy dog
+1000	echo One one thousand
+2000	echo Two one thousand
+3000	echo Three one thousand
+4000	echo Four one thousand
+5000 time
