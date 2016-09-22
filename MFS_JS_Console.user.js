@@ -8,6 +8,9 @@
 // @grant       GM_setValue
 // @grant       GM_xmlhttpRequest
 // ==/UserScript==
+/*
+GM_getValue = function(sth,def) {return def;}
+*/
 
 //namespaces
 mfs = window.mfs ||{};
@@ -21,8 +24,10 @@ mfs.c.state = mfs.c.state||{
 	togglekey	:'`',
 	regex: {
 		arg: /(^|\s)("([^"]*)"|-*[^\s]*)/g,
-		filename2: /[^/\\&\?]+\.\w{3,4}(?=([\?&].*$|$))/, //stackoverflow.com/a/26253039
-		filename: /[^/\\&\?]+(?=([\?&].*$|$))/, //stackoverflow.com/a/26253039
+		// filenames from stackoverflow.com/a/26253039
+		filename: /[^/\\&\?]+(?=([\?&].*$|$))/, // (no ext check)
+		filename2: /[^/\\&\?]+\.\w{3,4}(?=([\?&].*$|$))/, // (ext check)
+		filename3: /([^/\\&\?]+)\.\w{3,4}(?=([\?&].*$|$))/, // (exclude ext)
 		video: /.(webm|mp4|ogv)(\?|#|$)/i,
 		audio: /.(mp3|ogg|wav)(\?|#|$)/i,
 		timedbatch: /^(\d*)\b(.*)$/m
@@ -33,17 +38,18 @@ mfs.c.state = mfs.c.state||{
 };
 // public vars (editable from command)
 mfs.c.vars = JSON.parse(GM_getValue('vars',JSON.stringify({
-	echo:1,
-	mru:1,
-	imgDlType:'image/jpeg'
+	echo: 1,
+	mru: 1,
+	imgDlType: 'image/jpeg',
+	imgDlDelay: 500
 })));
 mfs.c.style= '#mfs-c-container{position:fixed;left:0;top:0;width:35em;height:25em;font-size:12px;text-align:left;z-index:2147483640}#mfs-c-container :link{color:#9999ff}#mfs-c-input,#mfs-c-output{background:rgba(0,0,0,0.65);color:#ddd;font-family:monospace;border:1px inset #ddd;text-shadow: 1px 1px black;}#mfs-c-input{width:100%;height:2em}#mfs-c-output{height:23em;overflow:auto;resize:both}#mfs-c-output .lnoutput {display:block;min-height:1em;}#mfs-c-output .normal {}#mfs-c-output .input,#mfs-c-output .input:before {color:lime}#mfs-c-output .input:before {content:"]"}#mfs-c-output .textdump {color:#fff}#mfs-c-output .info {color:#a4e9ff}#mfs-c-output .warn {color:#ff9900}#mfs-c-output .error {color:#ff2222}#mfs-c-output .important {color:lime;font-weight:bold}#mfs-c-output .lnoutput.mfs-c-gallery {display:inline-block!important;margin:4px}';
 
 // Utility functions
 mfs.c.util = mfs.c.util||{};
 mfs.c.util.txtfmt = function(s,ar) { // formats text, replace $n with array of strings
-	for(i=1;i<=ar.length;i++){
-		s = s.replace('$'+i,ar[i-1]||'');
+	for(var x=1;x<=ar.length;x++){
+		s = s.replace('$'+x,ar[x-1]||'');
 	}
 	return s;
 };
@@ -84,47 +90,49 @@ mfs.c.util.ajax = function(url,callback,argObj) {
 mfs.c.util.dlImg = function(imgEl,imgtype,callback) {
 	if (!imgtype) imgtype=mfs.c.vars.imgDlType||'image/png';
 	//mfs.c.print('Downloading '+name);
+	//mfs.c.print(imgtype);
 	
 	// core functionality put in callback to handle both cached and uncached situations
-	var hcallback = function(img,imgtype){
+	var hcallback = function(img,himgtype){
+		console.log(himgtype);
+		try {
 		var canvas = document.createElement('canvas');
 		canvas.width = img.width;
 		canvas.height = img.height;
-		var ctx=canvas.getContext('2d');
+		var ctx = canvas.getContext('2d');
 		ctx.drawImage(img,0,0);
-		var dataURL=canvas.toDataURL(imgtype);
-		//console.log(img, dataURL.replace('image/png','application/mfs-c-png'));
+		var dataURL = canvas.toDataURL(himgtype);
 		
-		var namergx= mfs.c.state.regex.filename2 || /[^/\\&\?]+\.\w{3,4}(?=([\?&].*$|$))/;
-		var name=namergx.exec(imgEl.src)[0] || imgEl.src;
+		var namergx = mfs.c.state.regex.filename3 || /([^/\\&\?]+)\.\w{3,4}(?=([\?&].*$|$))/;
+		var name = namergx.exec(imgEl.src)[1] || imgEl.src,
+			ext = (himgtype==='image/jpeg') ?'.jpg' :'.png';
 		var a = document.createElement('a');
-		a.download=name||'image';
-		a.href=dataURL.replace(imgtype,'application/mfs-c-png');
-		//console.log(a)
+		a.download = (name||'image')+ext;
+		a.href=dataURL.replace(himgtype,'application/mfs-c-png');
+		//console.log(img, dataURL.replace('image/png','application/mfs-c-png'));
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
+		} catch (e)	{
+			console.log('error in hcallback');
+		}
 		if (callback) callback();
 	};
 	
 	// set up img element to handle loading/cache retrieval
 	var himg = new Image();
 	himg.onload = function(e) { // if img not in cache
-		//console.log('not in cache?');
 		hcallback(e.target,imgtype);
 	};
 	himg.onerror = function(e) {
-		mfs.c.print('\tDownload failed!',5);
-		//console.log(e);
+		mfs.c.print('Image download failed!',5);
 		callback();
 	};
 	himg.setAttribute('crossOrigin','anonymous');
 	himg.src = imgEl.src;
-	if (himg.complete) { // img in cache
-		//console.log('in cache?');
-		hcallback(himg,imgtype);
+	if (himg.complete) { // img in cache?
+		//hcallback(himg,imgtype);
 	}
-	//console.log(himg);
 };
 mfs.c.util.processImgDlQueue = function(){
 	// quit if nothing in queue /or dl is in progress/
@@ -133,12 +141,14 @@ mfs.c.util.processImgDlQueue = function(){
 	mfs.c.print(mfs.c.state.imgDlQueue.length + ' images in download queue',3);
 	// call the dl fn, set callback fn
 	mfs.c.util.dlImg(mfs.c.state.imgDlQueue[0],mfs.c.vars.imgDlType, function() {
-		mfs.c.state.imgDlQueue.shift();
-		if(mfs.c.state.imgDlQueue.length===0) { // no more img to process
+		if(mfs.c.state.imgDlQueue.length<=1) { // no more img to process
+			mfs.c.state.imgDlQueue=[];
 			mfs.c.state.imgDlTimeoutID=0;
 			mfs.c.print('Finished images in download queue',3);
 		} else { // continue, call this fn again using the timeout
-			mfs.c.state.imgDlTimeoutID=setTimeout(mfs.c.util.processImgDlQueue,10);
+			mfs.c.state.imgDlQueue.shift();
+			var delay = mfs.c.vars.imgDlDelay || 10;
+			mfs.c.state.imgDlTimeoutID=setTimeout(mfs.c.util.processImgDlQueue,delay);
 		}
 	});
 };
@@ -148,7 +158,10 @@ mfs.c.cmd = mfs.c.cmd||{};
 mfs.c.cmd.null = function() {}; // sinkhole
 mfs.c.cmd.time = function(argObj) {
 	now = new Date();
-	mfs.c.print(now.toString());
+	if (argObj.iso) { mfs.c.print(now.toISOString()); }
+	else if (argObj.t) { mfs.c.print(now.toTimeString()); }
+	else if (argObj.d) { mfs.c.print(now.toDateString()); }
+	else { mfs.c.print(now.toString()); }
 };
 mfs.c.cmd.listimg = function(args) {
 	// main function, called as callback to ajax later in this fn
@@ -157,7 +170,7 @@ mfs.c.cmd.listimg = function(args) {
 		var domlist = docObj.getElementsByTagName('img'),
 			imgarray = [].slice.call(domlist);
 		mfs.c.print(docObj.title + ' - ' + imgarray.length + ' images:');
-		for(i=0;i<imgarray.length;i++){	
+		for(var i=0;i<imgarray.length;i++){	
 			//filter properties
 			if (imgarray[i].width<args.w || imgarray[i].width>args.W) continue;
 			if (imgarray[i].height<args.h || imgarray[i].height>args.H) continue;
@@ -193,7 +206,14 @@ mfs.c.cmd.listimg = function(args) {
 mfs.c.cmd.dlimg = function(args){
 	if (args.clear) { // clear the queue
 		mfs.c.state.imgDlQueue = [];
+		clearTimeout(mfs.c.state.imgDlTimeoutID);
 		mfs.c.state.imgDlTimeoutID = 0;
+		mfs.c.print('cleared download queue',3);
+		return 0;
+	} else if (args.listqueue) {
+		for(var i=0; i<mfs.c.state.imgDlQueue.length; i++) {
+			mfs.c.print(mfs.c.state.imgDlQueue[i].src)
+		}
 	} else if (args[0]||args[1]||args[2]) {
 		mfs.c.print('Downloading the specified images...');
 		var s = args[0],
@@ -201,7 +221,7 @@ mfs.c.cmd.dlimg = function(args){
 		end  =Number(args[2]) || 10,
 		d = (end>=start)?1:-1;
 		var imgarray=[];
-		for(i=start;i<=end;i+=d) {
+		for(var i=start;i<=end;i+=d) {
 			var imgEl= document.createElement('img');
 			imgEl.src = s.replace('$1',i);
 			imgarray.push(imgEl);
@@ -227,7 +247,7 @@ mfs.c.cmd.dlimg = function(args){
 	}
 	// call img dl queue worker
 	mfs.c.util.processImgDlQueue();
-}
+};
 
 mfs.c.cmd.av = function(argObj) {
 	if(!argObj[0]) {
@@ -244,9 +264,9 @@ mfs.c.cmd.av = function(argObj) {
 			elemlist[i] = document.createElement('audio');
 		}
 		if(elemlist[i]!==undefined) {
-			elemlist[i].controls=!argObj["nocontrols"];
-			elemlist[i].autoplay= argObj["autoplay"];
-			elemlist[i].loop    = argObj["loop"];
+			elemlist[i].controls=!argObj.nocontrols;
+			elemlist[i].autoplay= argObj.autoplay;
+			elemlist[i].loop    = argObj.loop;
 			
 			source=document.createElement('source');
 			source.src=url;
@@ -266,10 +286,10 @@ mfs.c.cmd.genlinks = function(argObj) {
 	var s = argObj[0],
 		start=Number(argObj[1]) || 1,
 		end  =Number(argObj[2])	|| 10;
-	for(i=start;i<=end;i++) {
+	for(var i=start; i<=end; i++) {
 		mfs.c.print(mfs.c.util.htmlLink(s.replace('$1',i)));
 	}
-}
+};
 
 mfs.c.cmd.type = function(argObj){
 	if (!argObj[0]) {
@@ -278,12 +298,12 @@ mfs.c.cmd.type = function(argObj){
 	}
 	mfs.c.util.ajax(argObj[0],function(r){
 		if(r.status==200) {
-			mfs.c.print(decodeURI(encodeURI(r.responseText)), 2,true)
+			mfs.c.print(decodeURI(encodeURI(r.responseText)), 2,true);
 		} else {
 			mfs.c.print('Error loading ' +argObj[0]+ ' : ' +r.status+ ' - ' +r.statusText,5);
 		}
 	});
-}
+};
 mfs.c.cmd.exec = function(argObj){
 	// batch parser with timestamp support
 	if (!argObj[0]) {
@@ -302,7 +322,7 @@ mfs.c.cmd.exec = function(argObj){
 				t=Number(m[1])||0;
 				s=m[2].trim();
 				if(t>0) {// timed 
-					tout.push(setTimeout(function(s){mfs.c.parse(s,true)},t,s));
+					tout.push(setTimeout(function(s){mfs.c.parse(s,true);},t,s));
 				} else {
 					mfs.c.parse(s,true); // parse with batch flag on
 				}
@@ -323,14 +343,14 @@ mfs.c.cmdTable = {
 	"dlimg"		: mfs.c.cmd.dlimg,		// dl images, can take same arg as genlinks
 	"type"		: mfs.c.cmd.type,		// type file
 	"exec"		: mfs.c.cmd.exec 		// batch parser
-}
+};
 // just a list of commands directly interpreted by parser
-mfs.c.cmdlist=['echo','clear','cls','clc','help','reload','var','savevar'];
+mfs.c.cmdlist=['echo','clear','cls','clc','help','reload','var','savevar','rem'];
 
 // PARSE ROUTINE
 mfs.c.parse = function(s,batch) {
 	// echo. suppress if batch
-	if(!batch && mfs.c.vars.echo) {mfs.c.print(s,1)}
+	if(!batch && mfs.c.vars.echo) {mfs.c.print(s,1);}
 	
 	// parse command and args
 	var cmd=s.trim(),
@@ -359,7 +379,7 @@ mfs.c.parse = function(s,batch) {
 				Array.prototype.forEach.call(document.querySelectorAll('.lnoutput'), function( node ) {
 					node.parentNode.removeChild( node );
 				}); // stackoverflow.com/a/13125840
-			} else { mfs.c.output.innerHTML=''}
+			} else { mfs.c.output.innerHTML='';}
 			break;
 		case 'reload':
 			location.reload();
@@ -367,11 +387,11 @@ mfs.c.parse = function(s,batch) {
 		case 'help':
 			var li=[].slice.call(mfs.c.cmdlist);
 			for (var key in mfs.c.cmdTable) {
-				if(mfs.c.cmdTable.hasOwnProperty(key)) li.push(key)
+				if(mfs.c.cmdTable.hasOwnProperty(key)) li.push(key);
 			}
 			li.sort();
 			mfs.c.print(li.join('\n'));
-			delete li;
+			//delete li;
 			break;
 		case 'var':
 			if(args.length) {
@@ -416,7 +436,7 @@ mfs.c.parse = function(s,batch) {
 		opt.appendChild(t);
 		mfs.c.histDOM.appendChild(opt);
 	}
-}
+};
 mfs.c.argObj = function(args) {
 	if(args.length==0) return {};
 	
@@ -448,7 +468,7 @@ mfs.c.argObj = function(args) {
 	if (expectValue) o[key]=true; // when loop has ended but still expecting value, treat key as switch
 	//o['_n']=i;
 	return o;
-}
+};
 
 // PRINT ROUTINE
 mfs.c.print=function(s,type,htmlescape,append) {
@@ -467,16 +487,16 @@ mfs.c.print=function(s,type,htmlescape,append) {
 	oel.className="lnoutput " + stype;
 	lines = s.replace(/\t/g,'    ').split('\n');
 	if(htmlescape) {
-		for(i=0; i<lines.length; i++) {
+		for(var i=0; i<lines.length; i++) {
 			oel.appendChild(document.createTextNode(lines[i]));
 			oel.appendChild(document.createElement('br'));
 		}
-	} else { oel.innerHTML+=lines.join('<br/>') }
+	} else { oel.innerHTML+=lines.join('<br/>'); }
 	mfs.c.output.appendChild(oel);
-}
+};
 mfs.c.fprint=function(s,args,type) {
-	mfs.c.print(mfs.c.util.txtfmt(s,args),type)
-}
+	mfs.c.print(mfs.c.util.txtfmt(s,args),type);
+};
 
 // COMMAND ADD-IN MANAGER
 mfs.c.addCmd = function(typename,objname,fn) {
@@ -486,10 +506,10 @@ mfs.c.addCmd = function(typename,objname,fn) {
 		mfs.c.cmd[objname] = fn;
 		mfs.c.cmdTable[typename]=mfs.c.cmd[objname];
 	}
-}
+};
 mfs.c.rmvCmd = function(objname) {
 	//
-}
+};
 
 mfs.c.init = function() {
 	mfs.c.container = mfs.c.container || document.createElement('div');
@@ -498,7 +518,7 @@ mfs.c.init = function() {
 	mfs.c.input = mfs.c.input || document.createElement('input');
 	mfs.c.input.type = 'text';
 	mfs.c.input.id   = 'mfs-c-input';
-	mfs.c.histDOM = mfs.c.histDOM || document.createElement('datalist')
+	mfs.c.histDOM = mfs.c.histDOM || document.createElement('datalist');
 	mfs.c.histDOM.id = 'mfs-c-inputlist';
 	mfs.c.input.setAttribute('list','mfs-c-inputlist');
 	
@@ -527,7 +547,7 @@ mfs.c.init = function() {
 			if(t.className.match(/\binput\b/ig)) {
 				mfs.c.input.value=t.innerText;
 				return;
-			} else {t = t.parentNode}
+			} else {t = t.parentNode;}
 		}
 	});
 	/*mfs.c.output.onresize = function(){
@@ -538,18 +558,18 @@ mfs.c.init = function() {
 	mfs.c.styleEl.innerHTML = mfs.c.style;
 	document.body.appendChild(mfs.c.styleEl);
 	mfs.c.print([mfs.c.state.title,mfs.c.state.ver].join(' '));
-	mfs.c.cmd.time();
+	mfs.c.cmd.time({});
 	
-	mfs.c.state['loaded']=true;
+	mfs.c.state.loaded=true;
 	console.log('mfs js console loaded');
 };
 
 document.addEventListener('keypress',function(e) {
-		if(e.key!==mfs.c.state['togglekey']) return false;
-		if (!mfs.c.state['loaded']) mfs.c.init();
+		if(e.key!==mfs.c.state.togglekey) return false;
+		if (!mfs.c.state.loaded) mfs.c.init();
 		
-		mfs.c.state['visible']=!mfs.c.state['visible'];
-		mfs.c.container.style.display = (mfs.c.state['visible']) ? "block" : "none";
+		mfs.c.state.visible=!mfs.c.state.visible;
+		mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
 		e.preventDefault();
-		if(mfs.c.state['visible']) mfs.c.input.focus();
+		if(mfs.c.state.visible) mfs.c.input.focus();
 	});
