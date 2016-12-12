@@ -1,5 +1,6 @@
 html {
-    background-color: rgba(0, 0, 0, 0.75);
+    background-color: rgba(0, 0, 0, 0.75) !important;
+	box-sizing: border-box;
 }
 body {
     padding: 0;
@@ -11,26 +12,30 @@ body {
 }
 #mfs-c-input,
 #mfs-c-output {
-    background: transparent;
     color: #ddd;
     font-family: monospace;
-    border: 1px inset #ddd;
     text-shadow: 1px 1px black;
 }
 #mfs-c-input {
+	background: rgba(0,0,0,0.5);
+	position: fixed;
+	left: 0; bottom: 0;
     width: 100%;
-    height: 2em
+    height: 2em;
+	border: 1px inset #ddd;
+	box-sizing: border-box;
 }
 #mfs-c-output {
-    /*height: 23em;
-    overflow: auto;
-    resize: both*/
+	margin-bottom: 2em;
+    max-height: -moz-calc(100% - 2em);
+	overflow: hidden;
 }
 #mfs-c-output .lnoutput {
     display: block;
     min-height: 1em;
 }
-#mfs-c-output .normal {}#mfs-c-output .input,
+#mfs-c-output .normal {}
+#mfs-c-output .input,
 #mfs-c-output .input:before {
     color: lime
 }
