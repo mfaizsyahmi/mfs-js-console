@@ -22,9 +22,9 @@ body {
     height: 2em
 }
 #mfs-c-output {
-    height: 23em;
+    /*height: 23em;
     overflow: auto;
-    resize: both
+    resize: both*/
 }
 #mfs-c-output .lnoutput {
     display: block;
