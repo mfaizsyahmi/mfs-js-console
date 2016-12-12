@@ -3,53 +3,83 @@
 // @namespace   mfsfareast
 // @description Something silly
 // @include     *
-// @version     0.1
+// @version     0.2
 // @grant       GM_getValue
 // @grant       GM_setValue
+// @grant		GM_deleteValue
 // @grant       GM_xmlhttpRequest
+// @grant       GM_getResourceText
+// @require		addCmds.js
+// @resource    containerStyle	https://github.com/mfaizsyahmi/mfs-js-console/raw/master/container.css
+// @resource    iframeStyle		https://github.com/mfaizsyahmi/mfs-js-console/raw/master/iframe.css
 // ==/UserScript==
+
+// TO DO:
+// - Use iframe container
+// - implement printcache for globals
+
 /*
-GM_getValue = function(sth,def) {return def;}
+function GM_getValue(sth,def) {return def;}
+function GM_setValue(varname, value) {}
+function GM_getResourceText() {}
 */
+// GM_deleteValue('vars'); // DEBUG
+GM_deleteValue('globalPosterRef')
+
+//if (typeof unsafeWindow != 'undefined') window = unsafeWindow;
 
 //namespaces
-mfs = window.mfs ||{};
-mfs.c= mfs.c ||{};
+mfs = window.mfs || {};
+mfs.c = mfs.c || {};
 
 // private states
-mfs.c.state = mfs.c.state||{
-	visible		:false,
-	title		:'MFS Javascript Console',
-	ver			:'v0.1',
-	togglekey	:'`',
+mfs.c.state = mfs.c.state || {
+	init		: false, // initialized?
+	visible		: false,
+	title		: 'MFS Javascript Console',
+	ver			: 'v0.1',
+	togglekey	: '`',
 	regex: {
 		arg: /(^|\s)("([^"]*)"|-*[^\s]*)/g,
 		// filenames from stackoverflow.com/a/26253039
 		filename: /[^/\\&\?]+(?=([\?&].*$|$))/, // (no ext check)
 		filename2: /[^/\\&\?]+\.\w{3,4}(?=([\?&].*$|$))/, // (ext check)
 		filename3: /([^/\\&\?]+)\.\w{3,4}(?=([\?&].*$|$))/, // (exclude ext)
+		filename4: /([^/\\&\?]+)(\.\w{3,4})(?=([\?&].*$|$))/, // separate name and ext
 		video: /.(webm|mp4|ogv)(\?|#|$)/i,
 		audio: /.(mp3|ogg|wav)(\?|#|$)/i,
 		timedbatch: /^(\d*)\b(.*)$/m
 	},
 	hist : [],
 	imgDlQueue: [],
-	imgDlTimeoutID: 0
+	imgDlTimeoutID: 0,
+	global: false, // should be public
+	//globalPosterRef: null;
+	printcache: [],
+	initOnPageLoad: false // should be public
 };
 // public vars (editable from command)
+
 mfs.c.vars = JSON.parse(GM_getValue('vars',JSON.stringify({
 	echo: 1,
 	mru: 1,
 	imgDlType: 'image/jpeg',
-	imgDlDelay: 500
+	imgDlDelay: 500,
+	'genlinks-anyname': true,
+	initOnPageLoad: false,
+	global: false
 })));
-mfs.c.style= '#mfs-c-container{position:fixed;left:0;top:0;width:35em;height:25em;font-size:12px;text-align:left;z-index:2147483640}#mfs-c-container :link{color:#9999ff}#mfs-c-input,#mfs-c-output{background:rgba(0,0,0,0.65);color:#ddd;font-family:monospace;border:1px inset #ddd;text-shadow: 1px 1px black;}#mfs-c-input{width:100%;height:2em}#mfs-c-output{height:23em;overflow:auto;resize:both}#mfs-c-output .lnoutput {display:block;min-height:1em;}#mfs-c-output .normal {}#mfs-c-output .input,#mfs-c-output .input:before {color:lime}#mfs-c-output .input:before {content:"]"}#mfs-c-output .textdump {color:#fff}#mfs-c-output .info {color:#a4e9ff}#mfs-c-output .warn {color:#ff9900}#mfs-c-output .error {color:#ff2222}#mfs-c-output .important {color:lime;font-weight:bold}#mfs-c-output .lnoutput.mfs-c-gallery {display:inline-block!important;margin:4px}';
 
-// Utility functions
+// ALIASES object
+mfs.c.aliases = JSON.parse(GM_getValue('aliases',JSON.stringify({})));
+
+
+// UTILITY FUNCTIONS
 mfs.c.util = mfs.c.util||{};
+
 mfs.c.util.txtfmt = function(s,ar) { // formats text, replace $n with array of strings
-	for(var x=1;x<=ar.length;x++){
-		s = s.replace('$'+x,ar[x-1]||'');
+	for(var x=1; x <= ar.length; x++ ) {
+		s = s.replace( '$'+x, ar[x-1] || '');
 	}
 	return s;
 };
@@ -152,8 +182,12 @@ mfs.c.util.processImgDlQueue = function(){
 		}
 	});
 };
+mfs.c.util.isGlobalPoster = function() {
+	console.log('isGlobalPoster is called', mfs.c.vars.global, GM_getValue('globalPosterRef',null));
+	return ( mfs.c.vars.global && GM_getValue('globalPosterRef',null)===location.href );
+}
 
-// built-in commands
+// BUILT-IN COMMANDS
 mfs.c.cmd = mfs.c.cmd||{};
 mfs.c.cmd.null = function() {}; // sinkhole
 mfs.c.cmd.time = function(argObj) {
@@ -182,9 +216,9 @@ mfs.c.cmd.listimg = function(args) {
 			
 			// add to array
 			if (args.thumb) {
-				o.push('<span class="lnoutput mfs-c-gallery">' +(i+1)+ ': <a href="' +src+ '" title="' +src+ '"><img src="' +src+ '" style="max-width:150px"/></a></span>');
+				o.push('<span class="lnoutput mfs-c-gallery">' +(i+1)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank"><img src="' +src+ '" style="max-width:150px"/></a></span>');
 			} else {
-				o.push('<span class="lnoutput normal">' +(i+1)+ ': <a href="' +src+ '" title="' +src+ '">' +s+ '</a>' +dims+ '</span>');
+				o.push('<span class="lnoutput normal">' +(i+1)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank">' +s+ '</a>' +dims+ '</span>');
 			}
 		}
 		mfs.c.output.innerHTML+=o.join('');
@@ -249,6 +283,7 @@ mfs.c.cmd.dlimg = function(args){
 	mfs.c.util.processImgDlQueue();
 };
 
+// AV - adds media to console output
 mfs.c.cmd.av = function(argObj) {
 	if(!argObj[0]) {
 		mfs.c.print('Not enough arguments',5);
@@ -278,19 +313,39 @@ mfs.c.cmd.av = function(argObj) {
 	return elemlist;
 };
 
+/* genlinks - generate links with name ranging between two numbers
+ * vars: genlinks-anyname - if true any filename will be accepted
+ */
 mfs.c.cmd.genlinks = function(argObj) {
 	if (!argObj[0]) {
 		mfs.c.print('Not enough arguments',5);
 		return false;
 	}
 	var s = argObj[0],
-		start=Number(argObj[1]) || 1,
-		end  =Number(argObj[2])	|| 10;
-	for(var i=start; i<=end; i++) {
-		mfs.c.print(mfs.c.util.htmlLink(s.replace('$1',i)));
+		numrange = [],
+		rgx = /*mfs.c.state.regex.filename4 ||*/ /([^/\\&\?]+)(\.\w{3,4})(?=([\?&].*$|$))/,
+		sp = (mfs.c.vars["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
+		console.log(sp)
+		
+	if(typeof argObj[3]!== 'undefined') { // more than three arguments, assume list of items
+		for(var n in argObj) {
+			if (argObj.hasOwnProperty(n) && !isNaN(argObj[n]) ) {
+				numrange.push( Number( argObj[n] ) );
+			}
+		}
+	} else { // three arguments or less, assume range
+		var start=Number(argObj[1]) || 1,
+			end  =Number(argObj[2])	|| 10;
+		for(var i=start; i<=end; i++) {
+			numrange.push(i);
+		}
+	}
+	for(var i=0; i<numrange.length; i++) {
+		mfs.c.print(mfs.c.util.htmlLink(sp.replace('$1',numrange[i])));
 	}
 };
 
+// TYPE - print contents of text file
 mfs.c.cmd.type = function(argObj){
 	if (!argObj[0]) {
 		mfs.c.print('Not enough arguments',5);
@@ -304,8 +359,9 @@ mfs.c.cmd.type = function(argObj){
 		}
 	});
 };
+
+// EXEC - batch parser with timestamp support
 mfs.c.cmd.exec = function(argObj){
-	// batch parser with timestamp support
 	if (!argObj[0]) {
 		mfs.c.print('Not enough arguments',5);
 		return false;
@@ -328,9 +384,13 @@ mfs.c.cmd.exec = function(argObj){
 				}
 			}
 		} else {
-			mfs.c.print('Error loading ' + argObj[0] + ' : ' + r.status,5);
+			mfs.c.print('Error loading ' + argObj[0] + ' : ' + r.status, 5);
 		}
 	});
+};
+
+mfs.c.cmd.alias = function(argObj) {
+	// do something here
 };
 
 // command table (name as typed : fn)
@@ -346,9 +406,14 @@ mfs.c.cmdTable = {
 };
 // just a list of commands directly interpreted by parser
 mfs.c.cmdlist=['echo','clear','cls','clc','help','reload','var','savevar','rem'];
+// container for custom commands
+mfs.c.addCmdTable = {}; // internal container, always nitialize
+//mfs.c.customCommands = mfs.c.customCommands || []; // external
+
 
 // PARSE ROUTINE
-mfs.c.parse = function(s,batch) {
+mfs.c.parse = function(s, batch) {
+	console.log('welcome to the parser')
 	// echo. suppress if batch
 	if(!batch && mfs.c.vars.echo) {mfs.c.print(s,1);}
 	
@@ -361,8 +426,7 @@ mfs.c.parse = function(s,batch) {
 		args = s.substr(s.indexOf(' ')+1);
 		argsObj = mfs.c.argObj(args);
 	}
-	console.log(cmd,args);
-	//return false;//debug
+	console.log('checkpoint parse 1')
 	
 	// start executing commands
 	// note: maybe make this obsolete?
@@ -389,6 +453,9 @@ mfs.c.parse = function(s,batch) {
 			for (var key in mfs.c.cmdTable) {
 				if(mfs.c.cmdTable.hasOwnProperty(key)) li.push(key);
 			}
+			for (var key in mfs.c.addCmdTable) {
+				if(mfs.c.addCmdTable.hasOwnProperty(key)) li.push(key);
+			}
 			li.sort();
 			mfs.c.print(li.join('\n'));
 			//delete li;
@@ -412,10 +479,8 @@ mfs.c.parse = function(s,batch) {
 			GM_setValue('vars',JSON.stringify(mfs.c.vars));
 			mfs.c.print('Saved',3); 
 			break;
-		case 'what':
-			if(args=='is love?') mfs.c.cmd.exec({0:'http://localhost:28373/whatislove.txt'});
-			break;
 		default:
+			console.log('checkpoint parse 2')
 			// lookup command table
 			var done=false;
 			for(var key in mfs.c.cmdTable) {
@@ -425,6 +490,19 @@ mfs.c.parse = function(s,batch) {
 					break;
 				}
 			}
+			// additional commands
+			if (!done && mfs.c.addCmdTable.length) {
+				// goes through additional command list
+				for(var key in mfs.c.addCmdTable) {
+					if(cmd==key) {
+						mfs.c.addCmdTable[key](argsObj);
+						done=true;
+						break;
+					}
+				}
+			}
+			
+			
 			if (!done) mfs.c.print('Unknown command: '+cmd,5);
 	}
 	
@@ -471,7 +549,11 @@ mfs.c.argObj = function(args) {
 };
 
 // PRINT ROUTINE
-mfs.c.print=function(s,type,htmlescape,append) {
+// s: the string to print
+// type: see the var typedef below
+// htmlescape: whether to escape html (certain commands prints html fragments)
+// fromGlobal: if true, do not propagate
+mfs.c.print = function(s, type, htmlescape, fromGlobal) {
 	var typedef = { // type definition
 		0: 'normal',
 		1: 'input',
@@ -481,95 +563,223 @@ mfs.c.print=function(s,type,htmlescape,append) {
 		5: 'error',
 		6: 'important'
 	};
-	if (typeof type=='undefined') type=0;
+	var blackliststr = mfs.c.vars.blacklist || "",
+		blacklist = blackliststr.split(),
+		now = new Date();
+	
+	if (typeof type === 'undefined') type = 0;
 	stype = typedef.hasOwnProperty(type)? typedef[type] : 'normal';
-	var oel=document.createElement('span');
+	var oel = document.createElement('span');
 	oel.className="lnoutput " + stype;
+	oel.dataset.timestamp = now.toLocaleTimeString();
 	lines = s.replace(/\t/g,'    ').split('\n');
+	
 	if(htmlescape) {
 		for(var i=0; i<lines.length; i++) {
+			for(var j=0; j<blacklist.length; j++) {
+				lines[i] = lines[i].replace(blacklist[j], "¦".repeat(blacklist[j].length) );
+			}
 			oel.appendChild(document.createTextNode(lines[i]));
 			oel.appendChild(document.createElement('br'));
 		}
 	} else { oel.innerHTML+=lines.join('<br/>'); }
 	mfs.c.output.appendChild(oel);
+	
+	// scroll to element (FF only!)
+	oel.scrollIntoView();
+	
+	if ( mfs.c.util.isGlobalPoster() && !fromGlobal ) {
+		var now = new Date();
+		mfs.c.state.printcache.push({
+			time: now.toJSON(),
+			s: s,
+			type: type,
+			htmlescape: htmlescape
+		})
+	}
 };
 mfs.c.fprint=function(s,args,type) {
 	mfs.c.print(mfs.c.util.txtfmt(s,args),type);
 };
 
-// COMMAND ADD-IN MANAGER
-mfs.c.addCmd = function(typename,objname,fn) {
-	if(mfs.c.cmd[objname]) {
+
+// COMMAND ADD-IN PARSER SUB
+// custom cmds in a object array
+// format: [{name:string, fn: function(){}},...]
+mfs.c.parseAddCmds = function() {
+	//console.log(mfs.c.customCommands)
+	if (!mfs.c.customCommands.length) return;
+	var list = mfs.c.customCommands,		
+		tbl = mfs.c.addCmdTable;
+	for (var i=0; i< list.length; i++) {
+		console.log(list[i])
+		if(typeof list[i]!= 'object' || typeof list[i].name != 'string' || typeof list[i].fn != 'function') {
+			mfs.c.print('Error: Invalid data type for custom command list item #' +i, 5);
+		} else if (tbl[ list[i].name ]) {
+			mfs.c.print('Error: Custom command of that name already exists! item #' + i,5);
+		} else {
+			tbl[typename]= list[i].fn;
+		}
+	}
+}
+
+// register individual cmds
+// typename: name of command as typed on console
+// objname : key name in table
+/*mfs.c.addCmd = function(typename, objname, fn) {
+	if(mfs.c.addCmdTable[objname]) {
 		mfs.c.print('Error: Command of that name already exists!',5);
 	} else {
-		mfs.c.cmd[objname] = fn;
-		mfs.c.cmdTable[typename]=mfs.c.cmd[objname];
+		mfs.c.addCmd[objname] = fn; // fn container
+		mfs.c.addCmdTable[typename] = mfs.c.addCmd[objname]; // name lookup table
 	}
 };
 mfs.c.rmvCmd = function(objname) {
 	//
 };
+*/
 
+// MAIN INITIALIZATION ROUTINE
 mfs.c.init = function() {
-	mfs.c.container = mfs.c.container || document.createElement('div');
+	// Stage 1: container and iframe first
+	mfs.c.container = document.createElement('div');
 	mfs.c.container.id = "mfs-c-container";
+	mfs.c.container.style.overflow = 'auto';
+	mfs.c.container.style.resize = 'both';
 	
-	mfs.c.input = mfs.c.input || document.createElement('input');
-	mfs.c.input.type = 'text';
-	mfs.c.input.id   = 'mfs-c-input';
-	mfs.c.histDOM = mfs.c.histDOM || document.createElement('datalist');
-	mfs.c.histDOM.id = 'mfs-c-inputlist';
-	mfs.c.input.setAttribute('list','mfs-c-inputlist');
-	
-	mfs.c.output = mfs.c.output || document.createElement('div');
-	mfs.c.output.id  = 'mfs-c-output';
-	
-	mfs.c.container.appendChild(mfs.c.input);
-	mfs.c.container.appendChild(mfs.c.histDOM);
-	mfs.c.container.appendChild(mfs.c.output);
-	document.body.appendChild(mfs.c.container);
-	mfs.c.container.style.display="none";
-	
-	mfs.c.container.addEventListener('keypress',function(e){
-		if (mfs.c.input.value.length==0) return false;
-		if (e.key=="Enter" || e.key=="Return") {
-			mfs.c.parse(mfs.c.input.value);
-			mfs.c.input.value="";
-		} else if (e.key=="Escape") {
-			mfs.c.input.value="";
-		}
-	});
-	
-	mfs.c.output.addEventListener('click',function(e){
-		var t = e.target;
-		while(t!=mfs.c.output){
-			if(t.className.match(/\binput\b/ig)) {
-				mfs.c.input.value=t.innerText;
-				return;
-			} else {t = t.parentNode;}
-		}
-	});
-	/*mfs.c.output.onresize = function(){
-		mfs.c.input.style.width = mfs.c.output.style.width
-	}*/
+	mfs.c.frame = document.createElement('iframe');
+	mfs.c.frame.id = 'mfs-c-frame';
 	
 	mfs.c.styleEl = document.createElement('style');
-	mfs.c.styleEl.innerHTML = mfs.c.style;
-	document.body.appendChild(mfs.c.styleEl);
-	mfs.c.print([mfs.c.state.title,mfs.c.state.ver].join(' '));
-	mfs.c.cmd.time({});
+	mfs.c.styleEl.innerHTML = GM_getResourceText('containerStyle');
 	
-	mfs.c.state.loaded=true;
-	console.log('mfs js console loaded');
+	// stage 2: inside the iframe
+	mfs.c.frame.addEventListener('load', function (e) {
+		mfs.c.input = mfs.c.frame.contentDocument.createElement('input');
+		mfs.c.input.type = 'text';
+		mfs.c.input.id   = 'mfs-c-input';
+		mfs.c.histDOM = mfs.c.frame.contentDocument.createElement('datalist');
+		mfs.c.histDOM.id = 'mfs-c-inputlist';
+		mfs.c.input.setAttribute('list','mfs-c-inputlist');
+	
+		mfs.c.output = mfs.c.frame.contentDocument.createElement('div');
+		mfs.c.output.id  = 'mfs-c-output';
+	
+		mfs.c.frameStyleEl = mfs.c.frame.contentDocument.createElement('style');
+		mfs.c.frameStyleEl.innerHTML = GM_getResourceText('iframeStyle');
+		
+		mfs.c.frame.contentDocument.body.appendChild(mfs.c.input);
+		mfs.c.frame.contentDocument.body.appendChild(mfs.c.histDOM);
+		mfs.c.frame.contentDocument.body.appendChild(mfs.c.output);
+		mfs.c.frame.contentDocument.head.appendChild(mfs.c.frameStyleEl);
+		
+		// add keypress event listener to the iframe
+		mfs.c.frame.contentWindow.addEventListener('keypress', function(e){
+			// check if toggle key is pressed
+			if(e.key===mfs.c.state.togglekey && e.ctrlKey==false) {
+				mfs.c.state.visible=!mfs.c.state.visible;
+				mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
+				mfs.c.input.blur();
+				
+				// all these to get focus back to parent
+				var meh = document.createElement('input');
+				meh.style.visible = "hidden";
+				meh.style.position = "fixed"; // prevent page scrolling to bottom on focus
+				document.body.appendChild(meh);
+				parent.focus();
+				meh.focus();
+				meh.blur();
+				document.body.removeChild(meh);
+				
+				e.preventDefault();
+			}
+
+			// now check if user presses enter
+			if (mfs.c.input.value.length==0) return false;
+			if (e.key=="Enter" || e.key=="Return") {
+				console.log('HI')
+				mfs.c.parse(mfs.c.input.value);
+				mfs.c.input.value="";
+			} else if (e.key=="Escape") {
+				mfs.c.input.value="";
+			}
+		});
+		
+		mfs.c.output.addEventListener('click',function(e){
+			var t = e.target;
+			while(t!=mfs.c.output){
+				if(t.className.match(/\binput\b/ig)) {
+					mfs.c.input.value=t.innerText;
+					return;
+				} else {t = t.parentNode;}
+			}
+		});
+		console.log('checkpoint listen');
+		
+		mfs.c.print([mfs.c.state.title, mfs.c.state.ver].join(' '));
+		mfs.c.cmd.time({});
+		
+		mfs.c.state.loaded=true;
+		console.log('mfs js console loaded');
+		if(mfs.c.state.visible) mfs.c.input.focus();
+	});	
+	
+	// append everything into place
+	mfs.c.container.appendChild(mfs.c.frame);
+	document.body.appendChild(mfs.c.container);
+	document.head.appendChild(mfs.c.styleEl);
+	mfs.c.container.style.display="none";
+	
 };
 
+// listen for toggle key on parent page
 document.addEventListener('keypress',function(e) {
-		if(e.key!==mfs.c.state.togglekey) return false;
-		if (!mfs.c.state.loaded) mfs.c.init();
+	if(e.key!==mfs.c.state.togglekey || e.ctrlKey==true) return false;
+	if (!mfs.c.state.loaded) {
+		mfs.c.init();
+		mfs.c.parseAddCmds();
+	}
+	
+	mfs.c.state.visible=!mfs.c.state.visible;
+	mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
+	e.preventDefault();
+	if(mfs.c.state.visible) mfs.c.input.focus();
+});
+
+// listen for focus
+document.addEventListener('focus',function(e) {
+	// on focus, set the global poster ref, and get the stored printcache
+	if ( mfs.c.vars.global ) {
+		GM_setValue('globalPosterRef', location.href);
+		mfs.c.state.printcache = GM_getValue('printcache')
+	}
+});
+
+mfs.c.globalInterval = function() {
+	var now = new Date();
+	if( mfs.c.util.isGlobalPoster() ) { // is poster?
+		var activecache = mfs.c.state.printcache;
 		
-		mfs.c.state.visible=!mfs.c.state.visible;
-		mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
-		e.preventDefault();
-		if(mfs.c.state.visible) mfs.c.input.focus();
-	});
+		// poster is in charge of clearing the print cache
+		for(var i=activecache.length-1; i>=0; i--) {
+			var printtime = new Date(activecache[i].time)
+			if (now - printtime > 10000) { // past 10 seconds
+				activecache.splice(i,1); // remove
+			}
+		}
+		GM_setValue('printcache', JSON.stringify(activecache) );
+		
+	} else { // listener
+		var activecache = GM_getValue('printcache',[]);
+		
+		// see if there's new stuff cached
+		for(var i=activecache.length-1; i>=0; i--) {
+			var printtime = new Date(activecache[i].time)
+			if (now - printtime < 0) { // past 10 seconds
+				mfs.c.print(activecache[i].s, activecache[i].type, activecache[i].htmlescape)
+			}
+		}
+	}
+}
+
+console.log('mfs js console - end of file');
