@@ -1,0 +1,12 @@
+#mfs-c-container {
+  position: fixed;
+  left: 0;
+  top: 0;
+  overflow: auto;
+  resize: both;
+  width: 35em;
+  height: 25em;
+  font-size: 12px;
+  text-align: left;
+  z-index: 2147483640
+}
