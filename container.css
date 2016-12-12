@@ -2,18 +2,21 @@
   position: fixed;
   left: 0;
   top: 0;
-  overflow: auto;
+  overflow: hidden !important;
   resize: both;
   width: 35em;
   height: 25em;
   font-size: 12px;
   text-align: left;
-  z-index: 2147483640
+  z-index: 2147483640;
   border: 2px solid #ddd;
+  box-sizing:content-box;
 }
 
 #mfs-c-frame {
   width: 100%;
   height: 100%;
   border: 0;
+  overflow:hidden;
+  box-sizing:content-box;
 }
