@@ -1,9 +1,9 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name        MFS JS Console
 // @namespace   mfsfareast
 // @description Something silly
 // @include     *
-// @version     0.2.1
+// @version     0.3.0
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -39,11 +39,11 @@ mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 
 // private states
-mfs.c.state = mfs.c.state || {
+mfs.c.state = /*mfs.c.state ||*/ {
 	init		: false, // initialized?
 	visible		: false,
 	title		: 'MFS Javascript Console',
-	ver			: 'v0.2',
+	ver			: 'v0.3.0',
 	togglekey	: '`',
 	regex: {
 		arg: /(^|\s)("([^"]*)"|-*[^\s]*)/g,
@@ -76,6 +76,7 @@ mfs.c.vars = JSON.parse(GM_getValue('vars',JSON.stringify({
 	'genlinks-anyname': true,
 	initOnPageLoad: false,
 	global: false,
+	globalInterval: 1000,
 	cmd_varsubst: false,
 	cmd_chain: false
 })));
@@ -147,6 +148,10 @@ mfs.c.parse = function(s, batch) {
 		case 'savevar':
 			GM_setValue('vars',JSON.stringify(mfs.c.vars));
 			mfs.c.print('Saved',3); 
+			break;
+		case "global":
+			mfs.c.vars.global = isNaN(argsObj[0])? 0 : Number(argsObj[0]) || 0;
+			mfs.c.globalSetup(mfs.c.vars.global);
 			break;
 			
 		default:
@@ -289,17 +294,22 @@ mfs.c.print = function(s, type, htmlescape, fromGlobal) {
 	oel.scrollIntoView();
 	
 	if ( mfs.c.util.isGlobalPoster() && !fromGlobal ) {
-		var now = new Date();
-		mfs.c.state.printcache.push({
-			time: now.toJSON(),
-			s: s,
-			type: type,
-			htmlescape: htmlescape
-		})
+		console.log('adding item to printcache here...')
+		var now = new Date(),
+			jsonow = now.toJSON(),
+			data = {
+				"time": jsonow,
+				"s": s,
+				"type": type,
+				"htmlescape": htmlescape
+			};
+		//mfs.c.state.printcache = mfs.c.state.printcache //|| [];
+		mfs.c.state.printcache.push(data);
+		console.log(mfs.c.state.printcache);
 	}
 };
 mfs.c.fprint=function(s,args,type) {
-	mfs.c.print(mfs.c.util.txtfmt(s,args),type);
+	mfs.c.print( mfs.c.util.txtfmt(s,args), type);
 };
 
 
@@ -322,34 +332,19 @@ mfs.c.parseAddCmds = function() {
 	console.log(tbl)
 }
 
-// register individual cmds
-// typename: name of command as typed on console
-// objname : key name in table
-/*mfs.c.addCmd = function(typename, objname, fn) {
-	if(mfs.c.addCmdTable[objname]) {
-		mfs.c.print('Error: Command of that name already exists!',5);
-	} else {
-		mfs.c.addCmd[objname] = fn; // fn container
-		mfs.c.addCmdTable[typename] = mfs.c.addCmd[objname]; // name lookup table
-	}
-};
-mfs.c.rmvCmd = function(objname) {
-	//
-};
-*/
-
 // GLOBAL system
-mfs.c.globalFocus = function(e) {
+mfs.c.globalFocus = function() {
 	// on focus, set the global poster ref, and get the stored printcache
-	if ( mfs.c.vars.global ) {
+	if ( mfs.c.vars.global && document.visibilityState === 'visible') {
 		GM_setValue('globalPosterRef', location.href);
-		mfs.c.state.printcache = GM_getValue('printcache')
+		mfs.c.state.printcache = JSON.parse(GM_getValue('printcache','[]'));
 	}
 }
+
 mfs.c.globalInterval = function() {
 	var now = new Date();
 	if( mfs.c.util.isGlobalPoster() ) { // is poster?
-		var activecache = mfs.c.state.printcache;
+		var activecache = mfs.c.state.printcache || [];
 		
 		// poster is in charge of clearing the print cache
 		for(var i=activecache.length-1; i>=0; i--) {
@@ -359,28 +354,38 @@ mfs.c.globalInterval = function() {
 			}
 		}
 		GM_setValue('printcache', JSON.stringify(activecache) );
+		//console.log(location.href, activecache);
 		
 	} else { // listener
-		var activecache = GM_getValue('printcache',[]);
+		var listencache = JSON.parse(GM_getValue('printcache','[]'));
+		var owncache = mfs.c.state.printcache;
 		
 		// see if there's new stuff cached
-		for(var i=activecache.length-1; i>=0; i--) {
-			var printtime = new Date(activecache[i].time)
-			if (now - printtime < 0) { // past 10 seconds
-				mfs.c.print(activecache[i].s, activecache[i].type, activecache[i].htmlescape)
+		for(var i=0; i<listencache.length; i++) {
+			var data = listencache[i];
+			if (owncache.findIndex(function(item){
+				return item.time === data.time
+			}) < 0 ) { // if item in listencache doesn't exist in owncache
+				mfs.c.print(data.s, data.type, data.htmlescape);
+				owncache.push(data);
 			}
 		}
+		//console.log(location.href, listencache);
 	}
+	
 }
 
 mfs.c.globalSetup = function(val) {
 	if(val) {
 		// listen for focus
-		document.addEventListener('focus', mfs.c.globalFocus(e) );
-		mfs.c.globalIntervalID = setInterval( function() {mfs.c.globalInterval() }, 500 )
+		document.addEventListener('visibilitychange', function(e) {mfs.c.globalFocus() } );
+		mfs.c.globalIntervalID = setInterval( function() {mfs.c.globalInterval() }, Number(mfs.c.vars.globalInterval)||1000 );
+		mfs.c.globalFocus(); // assume page that runs this is in focus
+		mfs.c.print('Global mode enabled', 3);
 	} else {
-		document.removeEventListener('focus', mfs.c.globalFocus(e) );
+		document.removeEventListener('visibilitychange', function(e) {mfs.c.globalFocus() } );
 		clearInterval(mfs.c.globalIntervalID)
+		mfs.c.print('Global mode disabled', 3)
 	}
 	
 }
@@ -481,6 +486,9 @@ mfs.c.init = function() {
 	document.head.appendChild(mfs.c.styleEl);
 	mfs.c.container.style.display="none";
 	
+	// some other subs to call
+	mfs.c.parseAddCmds();
+	if (mfs.c.vars.global) {mfs.c.globalSetup(mfs.c.vars.global);}
 };
 
 // listen for toggle key on parent page
@@ -490,7 +498,7 @@ document.addEventListener('keypress',function(e) {
 	
 	if (!mfs.c.state.loaded) {
 		mfs.c.init();
-		mfs.c.parseAddCmds();
+		// mfs.c.parseAddCmds();
 	}
 	
 	mfs.c.state.visible=!mfs.c.state.visible;

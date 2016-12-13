@@ -40,7 +40,7 @@ mfs.c.util.ajax = function(url,callback,argObj) {
 	if(typeof GM_xmlhttpRequest!= 'undefined') { // GM's method, can break through CORS
 		argObj.onload = function(r){
 			if(r.readyState===4) {
-				console.log(r);
+				//console.log(r);
 				callback(r);
 			}
 		};
@@ -53,7 +53,7 @@ mfs.c.util.ajax = function(url,callback,argObj) {
 		if(argObj.responseType) xhr.responseType = argObj.responseType;
 		if(argObj.mimeType) xhr.overrideMimeType(argObj.mimeType);
 		xhr.onload = function(r){
-				console.log('it\'s ready!');
+				//console.log('it\'s ready!');
 				callback(r.target);
 		};
 		xhr.open('Get', url);

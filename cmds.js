@@ -66,11 +66,12 @@ mfs.c.cmd.dlimg = function(args) {
 	} else if (args[0]||args[1]||args[2]) {
 		mfs.c.print('Downloading the specified images...');
 		var s = args[0],
-		start=Number(args[1]) || 1,
-		end  =Number(args[2]) || 10,
-		d = (end>=start)?1:-1;
+			start=Number(args[1]) || 1,
+			end  =Number(args[2]) || 10,
+			d = (end>=start)?1:-1;
 		var imgarray=[];
-		for(var i=start;i<=end;i+=d) {
+		
+		for(var i=start; i<=end; i+=d) {
 			var imgEl= document.createElement('img');
 			imgEl.src = s.replace('$1',i);
 			imgarray.push(imgEl);
@@ -213,7 +214,8 @@ mfs.c.cmd.alias = function(argObj) {
 		for (var a in mfs.c.aliases) {
 			if (mfs.c.aliases.hasOwnProperty(a)) { alist.push( [a, '"' + mfs.c.aliases[a] +'"' ].join(': ') ) }
 		}
-		mfs.c.fprint('$1 aliases in total', [alist.length], 3);
+		var count = alist.length || 0;
+		mfs.c.fprint('$1 aliases in total', [count.toString()], 3);
 		if (alist.length) { mfs.c.print( alist.join('\n') ); }
 		
 	} else if (!argObj[1]) { // remove alias
@@ -268,5 +270,6 @@ mfs.c.cmdTable = {
 	"type"		: mfs.c.cmd.type,		// type file
 	"exec"		: mfs.c.cmd.exec, 		// batch parser
 	"alias"		: mfs.c.cmd.alias,		// alias registrar
-	"var"		: mfs.c.cmd.vars		// variable get/set and query selector
+	"var"		: mfs.c.cmd.vars,		// variable get/set and query selector
+	"set"		: mfs.c.cmd.vars		// synonym
 };
