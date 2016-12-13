@@ -1,17 +1,17 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name        MFS JS Console
 // @namespace   mfsfareast
 // @description Something silly
 // @include     *
-// @version     0.2
+// @version     0.2.1
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
 // @grant       GM_xmlhttpRequest
 // @grant       GM_getResourceText
-// @require     util.js
-// @require     cmds.js
-// @require     addCmds.js
+// @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/util.js
+// @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/cmds.js
+// @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/addCmds.js
 // @resource    containerStyle	https://github.com/mfaizsyahmi/mfs-js-console/raw/master/container.css
 // @resource    iframeStyle		https://github.com/mfaizsyahmi/mfs-js-console/raw/master/iframe.css
 // ==/UserScript==
