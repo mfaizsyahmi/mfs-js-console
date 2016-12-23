@@ -187,18 +187,21 @@ mfs.c.cmd.exec = function(argObj) {
 			var lines = r.responseText.split('\n'),
 				rgx = mfs.c.state.regex.timedbatch || /^(\d*)\b(.*)$/m,
 				m, t, s,
-				tout=[];
-			for(var i=0;i<lines.length;i++){
-				m=rgx.exec(lines[i]);
+				tout=[],
+				cmdlist;
+			for(var i=0; i<lines.length; i++){
+				m = rgx.exec(lines[i]);
 				if(!m) continue;
-				t=Number(m[1])||0;
-				s=m[2].trim();
-				if(t>0) {// timed 
-					tout.push(setTimeout(function(s){mfs.c.parse(s,true);},t,s));
-				} else {
-					mfs.c.parse(s,true); // parse with batch flag on
+				t = Number(m[1])||0; // timecode
+				s = m[2].trim();     // the rest of the command
+				if(t>0) { // timed, set timeout 
+					tout.push( setTimeout(function(s){mfs.c.parse(s,true);},t,s));
+				} else { // non-timed, put in list
+					cmdlist.push(s);
 				}
 			}
+			// pass cmdlist to batch parser 
+			if (cmdlist.length) mfs.c.parseBatch(cmdlist) 
 		} else {
 			mfs.c.print('Error loading ' + argObj[0] + ' : ' + r.status, 5);
 		}
@@ -218,13 +221,17 @@ mfs.c.cmd.alias = function(argObj) {
 		mfs.c.fprint('$1 aliases in total', [count.toString()], 3);
 		if (alist.length) { mfs.c.print( alist.join('\n') ); }
 		
-	} else if (!argObj[1]) { // remove alias
+	} else if (!argObj[1] || (argObj.hasOwnProperty(commandName) && argObj.commandName==='unalias') ) { // remove alias
 		if (mfs.c.aliases.hasOwnProperty(argObj[0]) ) {delete mfs.c.aliases[ argObj[0] ];}
-		GM_setValue('aliases', JSON.stringify(mfs.c.aliases) ); // save
+		mfs.c.print('Cleared alias. "savevar" to make permanent.',3);
 		
 	} else if (argObj[1]) { // add alias
-		mfs.c.aliases[ argObj[0] ] = argObj[1]; // always override existing aliases
-		GM_setValue('aliases', JSON.stringify(mfs.c.aliases) ); // save
+		//if (mfs.c.cmdTable.hasOwnProperty(argObj[0]) || mfs.c.addCmdTable.hasOwnProperty(argObj[0]) ) {
+		//	mfs.c.print('Created/updated alias. "savevar" to make permanent.',3);
+		//} else {
+			mfs.c.aliases[ argObj[0] ] = argObj[1]; // always override existing aliases
+			mfs.c.print('Created/updated alias. "savevar" to make permanent.',3);
+		//}
 	}
 };
 
@@ -259,6 +266,43 @@ mfs.c.cmd.vars = function(argsObj) {
 	
 }
 
+
+// if. finally a way to construct basic logic in the console.
+// arguments:
+//  [0]: string1 OR regexp
+//  [1]: comparison operator OR the word "in"
+//  [2]: string2
+//  [3]: command if true
+//  [4]: the word "else"
+//  [5]: command if false
+mfs.c.cmd.if = function(argObj) {
+	if (!argObj[3]) { // need 4 arguments minimum
+		mfs.c.print('Not enough arguments!', 5);
+	} else if (argObj[1]==='in') { // regex matching
+		var rgx = new RegExp(argObj[0], (argObj.i)?"i":"" );
+		if ( rgx.exec(argObj[2]) ) mfs.c.parseBatch(argObj[3].split(';'));
+	} else {
+		var a = 0,
+			v1 = argObj[0],
+			op = argObj[1],
+			v2 = argObj[2];
+		
+		// all conditionals here. if any is true adds 1 to a.
+		a += (op==='==' && v1===v2)? 1: 0;
+		a += (op==='!=' && v1!= v2)? 1: 0;
+		a += (op==='>'  && v1 > v2)? 1: 0;
+		a += (op==='>=' && v1>= v2)? 1: 0;
+		a += (op==='<'  && v1 < v2)? 1: 0;
+		a += (op==='<=' && v1<= v2)? 1: 0;
+		
+		if (a) { // at the end, if a is nonzero, at least one conditional is true
+			mfs.c.parseBatch(argObj[3].split(';'));
+		} else if (argObj[4].toLowerCase()==='else' && argObj[5]) {
+			mfs.c.parseBatch(argObj[5].split(';'));
+		}
+	}
+}
+
 // command table (name as typed : fn)
 mfs.c.cmdTable = {
 	"listimg"	: mfs.c.cmd.listimg,
@@ -270,6 +314,8 @@ mfs.c.cmdTable = {
 	"type"		: mfs.c.cmd.type,		// type file
 	"exec"		: mfs.c.cmd.exec, 		// batch parser
 	"alias"		: mfs.c.cmd.alias,		// alias registrar
+	"unalias"	: mfs.c.cmd.alias,
 	"var"		: mfs.c.cmd.vars,		// variable get/set and query selector
-	"set"		: mfs.c.cmd.vars		// synonym
+	"set"		: mfs.c.cmd.vars,		// synonym
+	"if"		: mfs.c.cmd.if
 };

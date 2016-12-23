@@ -1,9 +1,9 @@
 ﻿// ==UserScript==
-// @name        MFS JS Console
+// @name        MFS Javascript Console
 // @namespace   mfsfareast
 // @description Something silly
 // @include     *
-// @version     0.3.0
+// @version     0.4.0
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -12,15 +12,14 @@
 // @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/util.js
 // @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/cmds.js
 // @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/addCmds.js
-// @resource    containerStyle	https://github.com/mfaizsyahmi/mfs-js-console/raw/master/container.css
-// @resource    iframeStyle		https://github.com/mfaizsyahmi/mfs-js-console/raw/master/iframe.css
+// add the @ to enable an extra js to load with this userscript
+// require     addCmds2.js
+// @resource    containerStyle  https://github.com/mfaizsyahmi/mfs-js-console/raw/master/container.css
+// @resource    iframeStyle     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/iframe.css
 // ==/UserScript==
 
 // TO DO:
-// - Use iframe container
-// - implement printcache for globals
-// - aliases
-
+// - nothing big atm...
 
 // DEBUG
 /*
@@ -28,7 +27,7 @@ function GM_getValue(sth,def) {return def;}
 function GM_setValue(varname, value) {}
 function GM_getResourceText() {}
 */
-// GM_deleteValue('vars'); 
+//GM_deleteValue('vars'); 
 //GM_deleteValue('globalPosterRef')
 //GM_deleteValue('aliases');
 
@@ -42,11 +41,14 @@ mfs.c = mfs.c || {};
 mfs.c.state = /*mfs.c.state ||*/ {
 	init		: false, // initialized?
 	visible		: false,
-	title		: 'MFS Javascript Console',
-	ver			: 'v0.3.0',
+	title		: GM_info.script.name || 'MFS Javascript Console',
+	ver			: GM_info.script.version || 'v0.3.1',
+	infoURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/',
+	helpURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/wiki/Commands',
 	togglekey	: '`',
 	regex: {
-		arg: /(^|\s)("([^"]*)"|-*[^\s]*)/g,
+		// improved dbl quote escaping from stackoverflow.com/a/481587
+		arg: /(?:^|\s+)("([^\\"]*|\\.*)"|-*[^\s]+)/g,
 		// filenames from stackoverflow.com/a/26253039
 		filename: /[^/\\&\?]+(?=([\?&].*$|$))/, // (no ext check)
 		filename2: /[^/\\&\?]+\.\w{3,4}(?=([\?&].*$|$))/, // (ext check)
@@ -61,10 +63,10 @@ mfs.c.state = /*mfs.c.state ||*/ {
 	imgDlTimeoutID: 0,
 	parseQueue: [],
 	parseTimeoutID: 0,
-	global: false, // should be public
+	//global: false, // should be public
 	//globalPosterRef: null;
 	printcache: [],
-	initOnPageLoad: false // should be public
+	//initOnPageLoad: false // should be public
 };
 
 // public vars (editable from command)
@@ -77,16 +79,16 @@ mfs.c.vars = JSON.parse(GM_getValue('vars',JSON.stringify({
 	initOnPageLoad: false,
 	global: false,
 	globalInterval: 1000,
-	cmd_varsubst: false,
-	cmd_chain: false
+	cmd_varsubst: true,
+	cmd_chain: true,
+	cmd_escape: true
 })));
 
 // container for aliases
 mfs.c.aliases = JSON.parse(GM_getValue('aliases',"{}"));
 
-
 // just a list of commands directly interpreted by parser
-mfs.c.cmdlist=['echo','clear','cls','clc','help','reload','savevar','rem'];
+mfs.c.cmdlist=['echo','echomd','clear','cls','clc','help','reload','savevar','rem'];
 // container for custom commands
 mfs.c.addCmdTable = {}; // internal container, always nitialize
 //mfs.c.customCommands = mfs.c.customCommands || []; // external
@@ -96,23 +98,40 @@ mfs.c.addCmdTable = {}; // internal container, always nitialize
 mfs.c.parse = function(s, batch) {
 	// echo. suppress if batch
 	if(!batch && mfs.c.vars.echo) {mfs.c.print(s,1);}
+	
+	// add to datalist (MRU list)
+	// note: Do this BEFORE varsubst!
+	if(!batch && mfs.c.vars.mru && mfs.c.state.hist.indexOf(s)==-1) {
+		mfs.c.state.hist.push(s);
+		var opt = document.createElement('option'),
+		t = document.createTextNode(s);
+		opt.appendChild(t);
+		mfs.c.histDOM.appendChild(opt);
+	}
+	
 	// substitute variables
-	if (mfs.c.vars['cmd_varsubst']) { s = mfs.c.util.txtfmt2(s, mfs.c.vars) }
+	var sp = (mfs.c.vars['cmd_varsubst'])? mfs.c.varSubst(s) : s;
+	sp = (mfs.c.vars['cmd_escape'])? mfs.c.util.typeEscape(sp):sp;
+	sp = sp.trim();
 	
 	// parse command and args
-	var cmd=s.trim(),
+	var cmd=sp.trim(),
 		args='',
 		argsObj={};
-	if(s.indexOf(' ')>0) {
-		cmd = s.substr(0,s.indexOf(' ')).trim().toLowerCase();
-		args = s.substr(s.indexOf(' ')+1);
+	if(sp.indexOf(' ')>0) {
+		cmd = sp.substr(0,sp.indexOf(' ')).trim().toLowerCase();
+		args = sp.substr(sp.indexOf(' ')+1);
 		argsObj = mfs.c.argObj(args);
+		argsObj.commandName = cmd; // adds the original command name as a property
 	}
 	
 	// start executing commands
 	switch(cmd) {
 		case 'rem': // batch rem, do nothing
 			break;
+		case 'echomd': // echo with partial markdown syntax support (for adding links)
+			args = args.replace(/\[([^\]]*)\]\(([^\)]*)\)/g,'<a href="$2">$1</a>');
+			// fall through to the next command, the normal echo
 		case 'echo':
 			mfs.c.print(args,2);
 			break;
@@ -138,16 +157,24 @@ mfs.c.parse = function(s, batch) {
 				if(mfs.c.cmdTable.hasOwnProperty(key)) li.push(key);
 			}
 			for (var key in mfs.c.addCmdTable) {
-				if(mfs.c.addCmdTable.hasOwnProperty(key)) li.push(key);
+				if(mfs.c.addCmdTable.hasOwnProperty(key)) li.push(key + ' *');
 			}
 			li.sort();
 			mfs.c.print(li.join('\n'));
+			mfs.c.print('* Custom command')
+			if (mfs.c.state.hasOwnProperty('helpURL')) {
+				mfs.c.fprint('Check out the <a href="$1" target="_blank">wiki page on Github</a>',[mfs.c.state.helpURL],3)
+			}
 			break;
-		//case 'var':
-			//break;
 		case 'savevar':
 			GM_setValue('vars',JSON.stringify(mfs.c.vars));
+			GM_setValue('aliases', JSON.stringify(mfs.c.aliases) ); // save
 			mfs.c.print('Saved',3); 
+			break;
+		case 'resetvar':
+			GM_setValue('vars', undefined);
+			GM_setValue('aliases', undefined); // save
+			mfs.c.print('Vars and aliases reset. Reload to take effect.',3); 
 			break;
 		case "global":
 			mfs.c.vars.global = isNaN(argsObj[0])? 0 : Number(argsObj[0]) || 0;
@@ -159,7 +186,7 @@ mfs.c.parse = function(s, batch) {
 			
 			// lookup command table
 			for(var key in mfs.c.cmdTable) {
-				if(cmd==key) {
+				if(mfs.c.cmdTable.hasOwnProperty(key) && cmd==key) {
 					mfs.c.cmdTable[key](argsObj);
 					done=true;
 					break;
@@ -179,69 +206,102 @@ mfs.c.parse = function(s, batch) {
 			}
 			
 			// aliases
-			if (!done && mfs.c.aliases.hasOwnProperty(cmd)) { // parse alias
-				console.log('found alias');
+			if (!done && mfs.c.aliases && mfs.c.aliases.hasOwnProperty(cmd)) { // parse alias
+				console.log('found alias: ' + cmd);
+				// prepare array of commands
 				var cmdlist = mfs.c.aliases[cmd].split(';');
 				
-				if (mfs.c.vars.cmd_chain) { // chained
-					mfs.c.state.parseQueue.push(cmdlist);
-					mfs.c.util.parseQueue(cmdlist[0],argsObj);
-				} else { // non-chaining, timeout all at same time
-					for(var aidx=0; aidx<cmdlist.length; aidx++) {
-						setTimeout( function(s, argsObj) {
-							mfs.c.parse( mfs.c.util.txtfmt(s, argsObj), true )
-						}(cmdlist[aidx],argsObj), 0);
-					}
+				// substitute arguments into command array NOW
+				for (var aj=0; aj<cmdlist.length; aj++) {
+					cmdlist[aj] = mfs.c.util.txtfmt(cmdlist[aj], argsObj);
 				}
+				
+				// pass array to parseBatch for further, *proper* processing
+				mfs.c.parseBatch(cmdlist, true);
 				done=true;
 			}
 			
 			if (!done) mfs.c.print('Unknown command: '+cmd,5);
 	}
 	
-	// add to datalist (MRU list)
-	if(!batch && mfs.c.vars.mru && mfs.c.state.hist.indexOf(s)==-1) {
-		mfs.c.state.hist.push(s);
-		var opt = document.createElement('option'),
-			t = document.createTextNode(s);
-		opt.appendChild(t);
-		mfs.c.histDOM.appendChild(opt);
-	}
-	
 	// chaining
 	if (batch && mfs.c.vars.cmd_chain && mfs.c.state.parseQueue.length) {
 		mfs.c.state.parseQueue.shift();
-		/*if (mfs.c.state.parseQueue.length) {
-			mfs.c.state.parseTimeoutID = setTimeout( function(s) {
-				mfs.c.parse(s,true)
-			}(mfs.c.state.parseQueue[0]), 0)
-		}*/
-		mfs.c.util.parseQueue(s, argsObj);
+		mfs.c.processParseQueue();
 	}
 };
+
+// batch parsing
+// NOTE: special rule for alias commands - current command 
+//       (ought to be an alias cmd at idx 0) should be removed and replaced with the new commands
+mfs.c.parseBatch = function(cmdArray, alias) {
+	if (!cmdArray || !cmdArray.length) return;
+	
+	if (mfs.c.vars.cmd_chain && alias) { // special alias processing
+		mfs.c.state.parseQueue.shift();
+		mfs.c.state.parseQueue = [].concat(cmdArray, mfs.c.state.parseQueue);
+		mfs.c.processParseQueue();
+	} else if (mfs.c.vars.cmd_chain) { // chained
+		mfs.c.state.parseQueue = mfs.c.state.parseQueue.concat(cmdArray);
+		console.log(mfs.c.state.parseQueue)
+		mfs.c.processParseQueue();
+		
+	} else { // non-chaining, timeout all at once
+		for(var i=0; i<cmdArray.length; i++) {
+			setTimeout( function(s) { 
+				mfs.c.parse(s,true);
+			}, 0, cmdArray[i]);
+		}
+	}
+}
+
+mfs.c.processParseQueue = function() {
+	if (!mfs.c.state.parseQueue.length) {
+		mfs.c.state.parseTimeoutID = 0;
+		return;
+	} else if (mfs.c.state.parseQueue.length>1000) {
+		console.log('WARNING: too many queued commands!!');
+		return;
+	}
+	
+	mfs.c.state.parseTimeoutID = setTimeout( function(s){
+		console.log('parsing queued command: '+s)
+		mfs.c.parse(s,true);
+		//mfs.c.state.parseQueue.shift();
+	}(mfs.c.state.parseQueue[0]), 0);
+}
+
+// argument object constructor - the keystone of the script
 mfs.c.argObj = function(args) {
 	if(args.length==0) return {};
 	
 	//split arguments keyvalue object
-	var o={}, m,i=0,c=0,expectValue=false;
+	var o={}, // output object
+		m,    // match array,where:
+		      //  [0]: whole match (rarely used) 
+			  //  [1]: key, switch, or value w/quotes
+			  //  [2]: value w/out quotes, if any
+		i=0,  // unnamed value index counter
+		c=0,  // token counter (fixed limit of 100)
+		expectValue=false; // flag next token as value to a key
 	
-	var t= mfs.c.state.regex.arg || /(^|\s)("([^"]*)"|-*[^\s]*)/g;
+	var t= mfs.c.state.regex.arg || /(?:^|\s+)("([^\\"]*|\\.*)"|-*[^\s]+)/g;
 	while(m = t.exec(args)) {
-		if(expectValue && m[2].substr(0,1)=='-') {
+		if(expectValue && m[1].substr(0,1)=='-') {
 			//prev is switch
 			o[key]=true;
 		}
-		if (m[2].substr(0,1)=='-') {
+		if (m[1].substr(0,1)=='-') {
 			//key, keep and look forward to value
-			key=m[2].substr(1);
+			key=m[1].substr(1);
 			expectValue=true;
 		} else if (expectValue) {
 			// value of keyvalue pair
-			o[key]=m[3]||m[2];
+			o[key]=m[2]||m[1];
 			expectValue=false;
 		} else {
 			// regular arguments
-			o[i]=m[3]||m[2];
+			o[i]=m[2]||m[1];
 			i++;
 		}
 		c++;
@@ -251,6 +311,24 @@ mfs.c.argObj = function(args) {
 	//o['_n']=i;
 	return o;
 };
+
+mfs.c.varSubst = function(s) {
+	// gets a copy of the vars JSON object
+	var varObj = JSON.parse(JSON.stringify(mfs.c.vars));
+	
+	// initialize other stuff
+	var now = new Date();
+	
+	// adds special dynamic vars
+	varObj.location = varObj.location || location.href;
+	varObj.fulldate = varObj.fulldate || now.toString();
+	varObj.date = varObj.date || now.toDateString();
+	varObj.time = varObj.time || now.toTimeString();
+	
+	// go and subst
+	s = mfs.c.util.txtfmt2(s, varObj);
+	return s;
+}
 
 // PRINT ROUTINE
 // s: the string to print
@@ -303,7 +381,6 @@ mfs.c.print = function(s, type, htmlescape, fromGlobal) {
 				"type": type,
 				"htmlescape": htmlescape
 			};
-		//mfs.c.state.printcache = mfs.c.state.printcache //|| [];
 		mfs.c.state.printcache.push(data);
 		console.log(mfs.c.state.printcache);
 	}
@@ -329,7 +406,6 @@ mfs.c.parseAddCmds = function() {
 			tbl[ list[i].name ] = list[i].fn;
 		}
 	}
-	console.log(tbl)
 }
 
 // GLOBAL system
@@ -384,8 +460,8 @@ mfs.c.globalSetup = function(val) {
 		mfs.c.print('Global mode enabled', 3);
 	} else {
 		document.removeEventListener('visibilitychange', function(e) {mfs.c.globalFocus() } );
-		clearInterval(mfs.c.globalIntervalID)
-		mfs.c.print('Global mode disabled', 3)
+		clearInterval(mfs.c.globalIntervalID);
+		mfs.c.print('Global mode disabled', 3);
 	}
 	
 }
@@ -396,9 +472,6 @@ mfs.c.init = function() {
 	// Stage 1: container and iframe first
 	mfs.c.container = document.createElement('div');
 	mfs.c.container.id = "mfs-c-container";
-	//mfs.c.container.style.overflow = 'auto';
-	//mfs.c.container.style.resize = 'both';
-	//mfs.c.container.style.display = 'none'
 	
 	mfs.c.frame = document.createElement('iframe');
 	mfs.c.frame.id = 'mfs-c-frame';
@@ -508,6 +581,6 @@ document.addEventListener('keypress',function(e) {
 
 if (mfs.c.vars.initOnPageLoad) {mfs.c.init();}
 
-if (mfs.c.util) {console.log('util module is loaded')}
-if (mfs.c.cmd) {console.log('cmd module is loaded')}
-console.log('mfs js console - end of file');
+//if (mfs.c.util) {console.log('util module is loaded')}
+//if (mfs.c.cmd) {console.log('cmd module is loaded')}
+console.log('mfs js console - loaded:', (mfs.c.util)?'util':'', (mfs.c.cmd)?'cmd':'');

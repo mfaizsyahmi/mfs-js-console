@@ -11,6 +11,7 @@
   z-index: 2147483640;
   border: 2px solid #ddd;
   box-sizing:content-box;
+  box-shadow: 2px 2px 4px black;
 }
 
 #mfs-c-frame {

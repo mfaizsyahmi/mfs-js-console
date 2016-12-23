@@ -17,8 +17,16 @@ mfs.c.util.txtfmt = function(s,ar) { // formats text, replace $n with array of s
 	}
 	return s;
 };
-mfs.c.util.txtfmt2 = function(s,obj) { // formats text, but with named arguments (used to subst variables)
-//	s = s.replace('$$', '$')
+mfs.c.util.txtfmt2 = function(s, obj) { // formats text, but with named arguments (used to subst variables)
+	//if (typeof s !== 'string') return;
+	
+	// first pass - replace all variables within curly brackets (a-la Apache)
+	for(var n in obj) {
+		if (obj.hasOwnProperty(n)) {
+			s = s.replace('${'+n+'}', obj[n]);
+		}
+	}
+	// second pass - replace variables *without* curly brackets
 	for(var n in obj) {
 		if (obj.hasOwnProperty(n)) {
 			s = s.replace('$'+n, obj[n]);
@@ -27,13 +35,32 @@ mfs.c.util.txtfmt2 = function(s,obj) { // formats text, but with named arguments
 	return s;
 };
 
+mfs.c.util.typeEscape = function(s) {
+	var map = {
+		b: '\b',
+		f: '\f',
+		n: '\n',
+		r: '\r',
+		t: '\t',
+		v: '\v',
+		'0': '\0',
+		"'": "\'",
+		'"': '\"',
+		'\\': '',
+	}
+	return s.replace(/\\([\\'"])/g, '$1').replace(/\\([bfnrtv0])/g, function(m, p1) {return map[p1]} )
+	//
+}
+
+// returns html fragment text of anchor tag
 mfs.c.util.htmlLink = function(uri,s) {
 	if(typeof s=='undefined'){s=uri;}
-	return mfs.c.util.txtfmt('<a href="$1">$2</a>',[uri,s]);
+	return mfs.c.util.txtfmt('<a href="$1" target="_blank">$2</a>',[uri,s]);
 };
+
+// a dumb ajax async fn. returns response regardless
+// callback is responsible to handle any errors
 mfs.c.util.ajax = function(url,callback,argObj) {
-	// a dumb ajax async fn. returns response regardless
-	// callback is responsible to handle any errors
 	if(typeof argObj=='undefined') argObj={};
 	argObj.method = 'GET';
 	argObj.url = url;
@@ -67,7 +94,7 @@ mfs.c.util.dlImg = function(imgEl,imgtype,callback) {
 	//mfs.c.print(imgtype);
 	
 	// core functionality put in callback to handle both cached and uncached situations
-	var hcallback = function(img,himgtype){
+	var hcallback = function(img, himgtype){
 		console.log(himgtype);
 		try {
 		var canvas = document.createElement('canvas');
@@ -122,23 +149,28 @@ mfs.c.util.processImgDlQueue = function() {
 		} else { // continue, call this fn again using the timeout
 			mfs.c.state.imgDlQueue.shift();
 			var delay = mfs.c.vars.imgDlDelay || 10;
-			mfs.c.state.imgDlTimeoutID=setTimeout(mfs.c.util.processImgDlQueue,delay);
+			mfs.c.state.imgDlTimeoutID = setTimeout(mfs.c.util.processImgDlQueue, delay);
 		}
 	});
 };
 
-mfs.c.util.parseQueue = function(s,argsObj) {
-	if (!mfs.c.state.parseQueue.length) {
-		mfs.c.state.parseTimeoutID = 0;
-		return false;
-	}
-	mfs.c.state.parseTimeoutID = setTimeout( function(s, argObj){
-		mfs.c.parse( mfs.c.util.txtfmt(s, argsObj) ,true);
-		//mfs.c.state.parseQueue.shift();
-	}(mfs.c.state.parseQueue[0], argsObj), 0)
-}
-
 mfs.c.util.isGlobalPoster = function() {
 	//console.log('isGlobalPoster is called', mfs.c.vars.global, GM_getValue('globalPosterRef',null));
 	return ( mfs.c.vars.global && GM_getValue('globalPosterRef',null)===location.href );
+}
+
+mfs.c.util.download = function(dataURL) {
+}
+
+mfs.c.util.expr = function(s) {
+	var rgx_1 = /\(([^\(\)]*)\)/; // brackets
+	var rgx_2 = /([-+]?\d+(?:\.\d+)?)(\*|\/|\%)([-+]?\d+(?:\.\d+)?)/;
+	var rgx_3 = /([-+]?\d+(?:\.\d+)?)(\+|\-)([-+]?\d+(?:\.\d+)?)/; // arithmetic 2
+	//tokenize
+	
+}
+mfs.c.util.expr_tokenizer = function(s) {
+	for (var i=0; i<s.length; i++) {
+		// do something
+	}
 }
