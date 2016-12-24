@@ -1,0 +1,3 @@
+rem This is a test autoexec file.
+
+echo $fulldate
