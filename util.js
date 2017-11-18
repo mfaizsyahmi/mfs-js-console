@@ -10,9 +10,9 @@ mfs.c.util.addslashes = function( str ) {
     return (str + '').replace(/[\\"']/g, '\\$&').replace(/\u0000/g, '\\0');
 }
 
-mfs.c.util.txtfmt = function(s,ar) { // formats text, replace $n with array of strings (1-based)
+mfs.c.util.txtfmt = function(s, ar) { // formats text, replace $n with array of strings (1-based)
 	for(var x=1; ; x++ ) {
-		if (!ar.hasOwnProperty(x-1)) {break;}
+		if (!ar.hasOwnProperty(x-1)) {break}
 		s = s.replace( '$'+x, ar[x-1] || '');
 	}
 	return s;
@@ -48,68 +48,137 @@ mfs.c.util.typeEscape = function(s) {
 		'"': '\"',
 		'\\': '',
 	}
-	return s.replace(/\\([\\'"])/g, '$1').replace(/\\([bfnrtv0])/g, function(m, p1) {return map[p1]} )
-	//
+	return s.replace(/\\([\\'"])/g, '$1').replace(/\\([bfnrtv0])/g, function typeEscapemMappedReplace(m, p1) {return map[p1]} )
 }
 
 // returns html fragment text of anchor tag
-mfs.c.util.htmlLink = function(uri,s) {
+mfs.c.util.htmlLink = function(uri, s) {
 	if(typeof s=='undefined'){s=uri;}
-	return mfs.c.util.txtfmt('<a href="$1" target="_blank">$2</a>',[uri,s]);
+	//return mfs.c.util.txtfmt('<a href="$1" target="_blank">$2</a>',[uri,s]);
+	return `<a href="${uri}" target="_blank">${s}</a>`;
 };
+
+// parse Markdown
+mfs.c.util.markdown = function(s) {
+	return s.replace(/\[([^\]]*)\]\(cmd:([^\)]*)\)/g, '<span class="cmd" data-cmd="$2" title="command: $2">$1</span>') //command
+			.replace(/\[([^\]]*)\]\(([^\)]*)\)/g, '<a href="$2" target="_blank">$1</a>') // link
+			.replace(/\b_([^_]*)_\b/g, '<i>$1</i>') // italics
+			.replace(/\*\b([^\*]*)\b\*/g, '<b>$1</b>'); // bold
+}
+
+// a standardized way to have commands support -outputvar
+// argObj: argObj as passed to command
+//   this fn checks the outputvar or o keyvalue of the object
+// s: value to output
+// type: print type
+//
+// TODO: add support for array
+mfs.c.util.outputVarOrPrint = function(argObj, s, type) {
+	let varname = argObj.outputvar || argObj.o;
+	//let arraynamepattern = varname.replace(/\[\]$/, "[$1]");
+	let isArray = Array.isArray(s);
+	
+	if (varname && isArray) { mfs.c.vars[varname] = /*JSON.stringify(s)*/s } 
+	else if (varname) { mfs.c.vars[varname] = s }
+	else { mfs.c.print(s, type) }
+}
+
+// var getter w/support for JSON parsing
+mfs.c.util.getVar = function(name) {
+	let varStr = mfs.c.vars[name];
+	return JSON.parse(varStr || null) || undefined;
+}
 
 // a dumb ajax async fn. returns response regardless
 // callback is responsible to handle any errors
-mfs.c.util.ajax = function(url,callback,argObj) {
-	if(typeof argObj=='undefined') argObj={};
-	argObj.method = 'GET';
-	argObj.url = url;
-	if(typeof GM_xmlhttpRequest!= 'undefined') { // GM's method, can break through CORS
-		argObj.onload = function(r){
-			if(r.readyState===4) {
-				//console.log(r);
+mfs.c.util.ajax = function (url, callback, argObj = {}) {
+	// check callback
+	if (typeof callback !== 'function') {
+		console.log('ERROR: callback not a function');
+		return
+	}
+	
+	let largObj = Object.assign({}, argObj);
+	largObj.method = 'GET';
+	largObj.url = url;
+	if (typeof GM_xmlhttpRequest !== 'undefined') { // GM's method, can break through CORS
+		largObj.onload = function (r) {
+			if (r.readyState===4) {
 				callback(r);
 			}
 		};
-		argObj.onerror = function(){console.log('error');};
-		GM_xmlhttpRequest(argObj);
-		console.log('GM xhr sent',argObj);
+		largObj.onerror = function () {console.log('error')};
+		GM_xmlhttpRequest(largObj);
+	} else if (mfs.c.vars.ajaxUseWhateverOrigin) { // Use the WhateverOrigin.org site
+		let encodedUrl = encodeURIComponent(url);
+		let newUrl = `http://whateverorigin.org/get?url=${encodedUrl}`;
+		//url = 'http://whateverorigin.org/get?url=' + ;
+		//mfs.c.util.jsonp(url, callback)
+		mfs.c.util.jsonp(newUrl, callback)
 	} else { // standard method
 		console.log('Standard xhr');
 		var xhr = new XMLHttpRequest();
-		if(argObj.responseType) xhr.responseType = argObj.responseType;
-		if(argObj.mimeType) xhr.overrideMimeType(argObj.mimeType);
-		xhr.onload = function(r){
-				//console.log('it\'s ready!');
-				callback(r.target);
+		if (largObj.responseType) xhr.responseType = largObj.responseType;
+		if (largObj.mimeType) xhr.overrideMimeType(largObj.mimeType);
+		xhr.onload = function (r) {
+			callback(r.target);
 		};
-		xhr.open('Get', url);
+		xhr.open('get', url);
 		xhr.send();
 		console.log('Standard xhr sent');
 	}
 };
+// http://stackoverflow.com/a/13230363
+mfs.c.util.jsonp = function(url, cb) {
+    var script = document.createElement('script');
+    script.async = true;
+    var callb = 'exec' + Math.floor((Math.random() * 65535) + 1);
+    window[callb] = function jsonpCallback(data) {
+        var scr = document.getElementById(callb);
+        scr.parentNode.removeChild(scr);
+		// WhateverOrigin returns data in data.contents(?) so copy that to responseText
+		if (data.contents && !data.responseText) r.responseText = r.contents;
+        cb(data);
+        window[callb] = null;
+        delete window[callb];
+    }
+    var sepchar = (url.indexOf('?') > -1) ? '&' : '?';
+    script.src = url + sepchar + 'callback=' + callb;
+    script.id = callb;
+    document.body.appendChild(script);
+}
+
+// filter url by its parts
+// is this the shared form of listlink?
+mfs.c.util.urlFilter = function(urlList, argObj) {
+	var out = [];
+	for (var i=0; i<urlList.length; i++) {
+		
+	}
+}
+
 mfs.c.util.dlImg = function(imgEl,imgtype,callback) {
-	if (!imgtype) imgtype=mfs.c.vars.imgDlType||'image/png';
+	if (!imgtype) imgtype = mfs.c.vars.imgDlType || 'image/png';
 	//mfs.c.print('Downloading '+name);
 	//mfs.c.print(imgtype);
 	
 	// core functionality put in callback to handle both cached and uncached situations
-	var hcallback = function(img, himgtype){
+	var hCallback = function(img, himgtype){
 		console.log(himgtype);
 		try {
 		var canvas = document.createElement('canvas');
 		canvas.width = img.width;
 		canvas.height = img.height;
 		var ctx = canvas.getContext('2d');
-		ctx.drawImage(img,0,0);
+		ctx.drawImage(img, 0, 0);
 		var dataURL = canvas.toDataURL(himgtype);
 		
 		var namergx = mfs.c.state.regex.filename3 || /([^/\\&\?]+)\.\w{3,4}(?=([\?&].*$|$))/;
 		var name = namergx.exec(imgEl.src)[1] || imgEl.src,
 			ext = (himgtype==='image/jpeg') ?'.jpg' :'.png';
 		var a = document.createElement('a');
-		a.download = (name||'image')+ext;
-		a.href=dataURL.replace(himgtype,'application/mfs-c-png');
+		a.download = (name||'image') + ext;
+		a.href=dataURL.replace(himgtype, 'application/x-mfsconsoleimage');
 		//console.log(img, dataURL.replace('image/png','application/mfs-c-png'));
 		document.body.appendChild(a);
 		a.click();
@@ -123,7 +192,7 @@ mfs.c.util.dlImg = function(imgEl,imgtype,callback) {
 	// set up img element to handle loading/cache retrieval
 	var himg = new Image();
 	himg.onload = function(e) { // if img not in cache
-		hcallback(e.target,imgtype);
+		hCallback(e.target, imgtype);
 	};
 	himg.onerror = function(e) {
 		mfs.c.print('Image download failed!',5);
@@ -141,7 +210,7 @@ mfs.c.util.processImgDlQueue = function() {
 	
 	mfs.c.print(mfs.c.state.imgDlQueue.length + ' images in download queue',3);
 	// call the dl fn, set callback fn
-	mfs.c.util.dlImg(mfs.c.state.imgDlQueue[0],mfs.c.vars.imgDlType, function() {
+	mfs.c.util.dlImg(mfs.c.state.imgDlQueue[0], mfs.c.vars.imgDlType, function dlImgCallback() {
 		if(mfs.c.state.imgDlQueue.length<=1) { // no more img to process
 			mfs.c.state.imgDlQueue=[];
 			mfs.c.state.imgDlTimeoutID=0;
@@ -159,10 +228,11 @@ mfs.c.util.isGlobalPoster = function() {
 	return ( mfs.c.vars.global && GM_getValue('globalPosterRef',null)===location.href );
 }
 
-mfs.c.util.download = function(dataURL) {
-}
+// WIP
+//mfs.c.util.download = function(dataURL) { }
 
-mfs.c.util.expr = function(s) {
+// Math expression (WIP)
+/*mfs.c.util.expr = function(s) {
 	var rgx_1 = /\(([^\(\)]*)\)/; // brackets
 	var rgx_2 = /([-+]?\d+(?:\.\d+)?)(\*|\/|\%)([-+]?\d+(?:\.\d+)?)/;
 	var rgx_3 = /([-+]?\d+(?:\.\d+)?)(\+|\-)([-+]?\d+(?:\.\d+)?)/; // arithmetic 2
@@ -173,4 +243,41 @@ mfs.c.util.expr_tokenizer = function(s) {
 	for (var i=0; i<s.length; i++) {
 		// do something
 	}
+}*/
+
+// parse dot notation
+mfs.c.util.dotGetValue = function(obj, str, own) {
+	var part = str.split('.'),
+		cur = obj;
+	for (var i=0; i<part.length; i++) {
+		if ( (own)? obj.hasOwnProperty(part[i]): true && cur[part[i]]) {
+			cur = cur[part[i]];
+		} else {
+			return undefined;
+		}
+	}
+	return cur;
+}
+
+mfs.c.util.displayElementAttr = function(val, attrlist) {
+	if (val) {
+		document.addEventListener('mouseenter', function(e, attrlist){
+			
+		})
+		return true;
+	} else {
+		
+		return false;
+	}
+}
+mfs.c.util._displayElementAttrEvent = function(e, attrlist) {
+	var s, list;
+	list.push(e.target.localName);
+	for (var i=0; i<attrlist.length; i++) {
+		s = attrlist[i] + ": "; // attr name
+		s = s + (attrlist[i]==='innerText') ? e.target.innerText : e.target.getAttribute(attrlist[i]);
+		list.push(s);
+	}
+	e.stopPropagation();
+	return list.join('\n');
 }
