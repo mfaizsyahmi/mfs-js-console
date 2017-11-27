@@ -16,11 +16,48 @@ mfs.c = mfs.c || {};
 mfs.c.customCommands = mfs.c.customCommands || [];
 
 mfs.c.customCommands.push({
-	name:"ppap", 
-	fn: function(argObj) {
-		mfs.c.print('I have a pen');
-		mfs.c.print('I have an apple');
-		mfs.c.print('UHH');
-		mfs.c.print('Apple Pen!');
+	name:"anidb",
+	namespace: 'mfs',
+	description: 'WIP',
+	fn: (argObj) => {
+		var db = JSON.parse(mfs.c.vars.anidb || "{}");
+		var actions = {
+			"list" : (argObj) => {
+				for(var n in db.animes) {}
+			}
+		}
 	}
 });
+
+mfs.c.customCommands.push({
+	name: "echolrc",
+	namespace: 'mfs',
+	description: 'Opens LRC files and print lyrics set to their timecodes',
+	fn: (argObj) => {
+		if (!argObj[0]) {
+			mfs.c.print('Not enough arguments',5);
+			return false;
+		}
+		var rgx = /^\[(\d+):(\d+\.\d+)\](.*)/;
+		
+		mfs.c.util.ajax(argObj[0], (r) => {
+			if (r.status===200) {
+				var text = decodeURI(encodeURI(r.responseText));
+				var lines = text.split('\n');
+				console.log(lines.length);
+				for (var i=0; i<lines.length; i++) {
+					var s = lines[i].replace(/<\d+:\d+.\d+>/gm,"");
+					var m = rgx.exec(s);
+					if (!m) continue;
+					if (m[2]) {
+						var t = Number(m[1])*60000 + Number(m[2])*1000;
+						console.log(t, m[3]);
+						setTimeout(function(s) {mfs.c.print(s, 2)}, t, m[3]);
+					}
+				}
+			} else {
+				mfs.c.print('welp',5)
+			}
+		})
+	}
+})

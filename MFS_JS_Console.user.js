@@ -1,9 +1,9 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name        MFScript Console
 // @namespace   mfsfareast
 // @description Something silly
 // @include     *
-// @version     0.5
+// @version     0.6.0
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -22,15 +22,17 @@
 // ==/UserScript==
 
 // TO DO:
-// autoexec /
+// autoexec (needs rework)
 // dom listener system
 // dom event dispatch system /
 // dom manipulation
-// print to anywhere on page
+// print to anywhere on page (using above system)
 // js-like interval system (to complement the above)
 // math expression
 // click to execute commands /
 // i18n
+// revamp command system so that they can supply properties specifying help text, where it's not okay to varsubst, etc.
+//   (looks like I'm doing what MC1.13 is doing)
 
 // DEBUG
 /*
@@ -51,7 +53,7 @@ mfs.c.state = { /*mfs.c.state ||*/
 	init		: false, // initialized?
 	visible		: false,
 	title		: GM_info.script.name || 'MFScript Console',
-	ver			: GM_info.script.version || 'v0.4.2',
+	ver			: GM_info.script.version || 'v0.6.0',
 	infoURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/',
 	helpURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/wiki/Commands',
 	togglekey	: '`',
@@ -66,7 +68,7 @@ mfs.c.state = { /*mfs.c.state ||*/
 		filename3: /([^/\\&\?]+)\.\w{3,4}(?=([\?&].*$|$))/, // (exclude ext)
 		filename4: /([^/\\&\?]+)(\.\w{3,4})(?=([\?&].*$|$))/, // separate name and ext
 		video: /.(webm|mp4|ogv)(\?|#|$)/i,
-		audio: /.(mp3|ogg|wav)(\?|#|$)/i,
+		audio: /.(mp3|ogg|wav|flac)(\?|#|$)/i,
 		timedbatch: /^(\d*)\b(.*)$/m
 	},
 	hist : [],
@@ -81,7 +83,9 @@ mfs.c.state = { /*mfs.c.state ||*/
 };
 
 // public vars (editable from command)
-mfs.c.vars = JSON.parse(GM_getValue('vars',JSON.stringify({
+// stack implementation allows for the env. var state to be pushed and popped, 
+//  provided mfs.c.var references the top of stack at all times
+mfs.c.varStack = [JSON.parse(GM_getValue('vars', JSON.stringify({
 	ajaxUseWhateverOrigin: false, // used to force-enable CORS
 	echo: 1,
 	mru: 1,
@@ -94,10 +98,21 @@ mfs.c.vars = JSON.parse(GM_getValue('vars',JSON.stringify({
 	cmd_varsubst: true,
 	cmd_chain: true,
 	cmd_escape: true
-})));
+}) ))];
+// initialize to point to top of stack
+mfs.c.vars = mfs.c.varStack[mfs.c.varStack.length-1];
 
 // container for aliases
+// prop:
+//  [alias name] : [alias string]
 mfs.c.aliases = JSON.parse(GM_getValue('aliases', '{}'));
+
+// container for autoexec
+// properties: 
+//  enabled : false to disable
+//  urlMatch: regexp string to match url (JSON.stringify-friendly)
+//  content: the commands, separated by newlines
+mfs.c.autoexec = JSON.parse(GM_getValue('autoexec', '{}'));
 
 // just a list of commands directly interpreted by parser
 mfs.c.cmdlist = ['echo', 'echomd', 'clear', 'cls', 'clc', 'help', 'reload', 'resetvar', 'savevar', 'rem'];
@@ -105,6 +120,104 @@ mfs.c.cmdlist = ['echo', 'echomd', 'clear', 'cls', 'clc', 'help', 'reload', 'res
 mfs.c.addCmdTable = {}; // internal container, always nitialize
 //mfs.c.customCommands = mfs.c.customCommands || []; // external
 
+// core commands
+mfs.c.commands = mfs.c.commands || [];
+mfs.c.commands = mfs.c.commands.concat([{
+	name: 'rem',
+	description: 'Marks reminder in batch scripts; it does nothing',
+	fn: () => {;} // do nothing
+}, {
+	names: ['echo', 'echomd', 'echocr'],
+	description: 'Prints text to the console',
+	fn: (argObj) => {
+		let printOptions = {
+			parseMarkdown: (argObj._commandName === 'echomd'),
+			clearLastLine: (argObj._commandName === 'echocr')
+		};
+		mfs.c.print(argObj._argStr, 'normal', printOptions);
+	}
+}, {
+	names: ['clear', 'cls', 'clr'],
+	description: 'Clears the console',	
+	fn: (argObj) => {
+		if (argObj.textonly) {
+			Array.prototype.forEach.call(mfs.c.output.querySelectorAll('.lnoutput'), (node) => {
+				node.parentNode.removeChild( node );
+			}); // stackoverflow.com/a/13125840
+		} else { mfs.c.output.innerHTML = ''}
+	}
+}, {
+	name: 'debug',
+	description: 'Prints the argument object as parsed',	
+	fn: (argObj) => {
+		console.log(argsObj);
+		mfs.c.print( JSON.stringify(argsObj), 'debug');
+	}
+}, {
+	name: 'reload',
+	description: 'Reloads the current page',
+	fn: (argObj) => { location.reload() }
+}, {
+	name: 'open',
+	description: 'Open a URL',	
+	fn: (argObj) => { if(argObj.hasOwnProperty('0')) location.assign(argsObj[0]);
+	}
+}, {
+	name: 'opentab',
+	description: 'Open URL(s) on new tab(s)',	
+	fn: (argObj) => {
+		let i = 0;
+		while (argObj.hasOwnProperty(i) && i < 32) {
+			GM_openInTab(argsObj[i]);
+			i++;
+		}
+	}
+}, {
+	name: 'pushvar',
+	description: 'Pushes the variable stack',
+	fn: () => {mfs.c.pushVarStack()}
+}, {
+	name: 'popvar',
+	description: 'Pops the variable stack',
+	fn: () => {mfs.c.popVarStack()}
+}, {
+	name: 'savevar',
+	description: 'Commits current variable stack to browser storage',
+	fn: () => {mfs.c.pushVarStack()}
+}, {
+	name: 'resetvar',
+	description: 'Reset variables to defaults',
+	fn: () => {
+		GM_setValue('vars', undefined);
+		mfs.c.print('Vars reset. Reload to take effect.', 3); 
+	}
+}, {
+	name: 'global',
+	description: 'Turns global mode on/off',
+	fn: (argObj) => {
+		mfs.c.vars.global = isNaN(argObj[0])? 0 : Number(argObj[0]) || 0;
+		mfs.c.globalSetup(mfs.c.vars.global);
+	}
+}, {
+	name: 'help',
+	description: 'Display help',
+	fn: () => {
+		let lines = [];
+		for (let cmd of mfs.c.commands) {
+			for (let cmdName of cmd.names || [cmd.name]) {
+				let nameCol = cmdName + ((cmd.custom)? '*' : '');
+				let space = ' '.repeat(Math.max(1, 12 - nameCol.length));
+				lines.push(`${nameCol}${space}${cmd.description||''}`);
+			}
+		}
+		lines.sort();
+		mfs.c.print(lines.join('\n'));
+		mfs.c.print('* Custom command')
+		if (mfs.c.state.helpURL) {
+			mfs.c.print(`Check out the [wiki page on Github](${mfs.c.state.helpURL})`, 3, {parseMarkdown: true});
+		}
+	}
+}]);
 
 // PARSE ROUTINE
 mfs.c.parse = function(s, batch) {
@@ -113,157 +226,76 @@ mfs.c.parse = function(s, batch) {
 	
 	// add to datalist (MRU list)
 	// note: Do this BEFORE varsubst!
-	if (!batch && mfs.c.vars.mru && mfs.c.state.hist.indexOf(s)==-1) {
+	if (!batch && mfs.c.vars.mru && mfs.c.state.hist.indexOf(s) == -1) {
 		mfs.c.state.hist.push(s);
-		var opt = document.createElement('option'),
+		let opt = document.createElement('option'),
 		t = document.createTextNode(s);
 		opt.appendChild(t);
 		mfs.c.histDOM.appendChild(opt);
 	}
 	
 	// substitute variables
-	var sp = (mfs.c.vars['cmd_varsubst'])? mfs.c.varSubst(s) : s;
-	//sp = (mfs.c.vars['cmd_escape'])? mfs.c.util.typeEscape(sp):sp;
+	// IDEA: do this after argObj(), to its values
+	let sp = (mfs.c.vars.cmd_varsubst === 1)? mfs.c.varSubst(s) : s;
 	sp = sp.trim();
 	
-	// parse command and args
-	var cmd = sp.trim();
-	var args = '';
-	var argsObj = {};
-	if(sp.indexOf(' ')>0) {
-		cmd = sp.substr(0,sp.indexOf(' ')).trim().toLowerCase();
-		args = sp.substr(sp.indexOf(' ')+1);
-		argsObj = mfs.c.argObj(args);
-		argsObj.commandName = cmd; // adds the original command name as a property
+	// get namespace and command name
+	let cmdPattern = /^(?:([\S]*?(?=:)):)?([\S]*)\b/ig;
+	let cmdMatch = cmdPattern.exec(sp);
+	let cmdNamespace = cmdMatch[1];
+	let cmdName = cmdMatch[2].toLowerCase();
+	// finding matching arguments early on to get argument specs for argObj
+	let cmdMatches = mfs.c.commands.filter( cmd => (cmd.names && cmd.names.includes(cmdName) ) || cmd.name===cmdName );
+	if (cmdMatches.length > 1) cmdMatches = cmdMatches.filter( cmd => cmd.namespace === cmdNamespace);
+	if (cmdMatches.length > 1) console.log(`Multiple matching commands found! Will proceed with the first one.`, cmdMatches);
+	let argSpec = (cmdMatches.length) ? cmdMatches[0].argSpec || {} : {};
+	
+	// get and parse arguments
+	let args = '';
+	let argsObj = {};
+	if (sp.indexOf(' ') > 0) {
+		args = sp.substr(sp.indexOf(' ') + 1);
+		argsObj = mfs.c.argObj(args, argSpec);
+		argsObj._commandName = cmdName; // adds the original command name as a property
+	}
+	// varsubst args string here, after argObj, for the echo commands
+	if (mfs.c.vars['cmd_varsubst'] === 2) {
+		args = mfs.c.varSubst(args);
+		argsObj._argStr = args;
 	}
 	
 	// start executing commands
-	switch(cmd) {
-		case 'rem': // batch rem, do nothing
-			break;
-		case 'echomd': // echo with partial markdown syntax support (for adding links)
-			args = mfs.c.util.markdown(args); // moved
-			// fall through to the next command, the normal echo
-		case 'echo':
-			mfs.c.print(args,2);
-			break;
-		case 'echocr': // removes last line (simulates carriage return)
-			mfs.c.output.lastElementChild.remove();
-			break;
-		case 'clear':
-		case 'cls':
-		case 'clc':
-			if (argsObj.textonly) {
-				Array.prototype.forEach.call(mfs.c.output.querySelectorAll('.lnoutput'), function nodeRemoveSelf(node) {
-					node.parentNode.removeChild( node );
-				}); // stackoverflow.com/a/13125840
-			} else { mfs.c.output.innerHTML=''}
-			break;
-		case 'debug': // test the argObj parser
-			console.log(argsObj);
-			mfs.c.print( JSON.stringify(argsObj) ); 
-			break;
-		case 'reload': // reload page
-			location.reload();
-			break;
-		case 'open': // open new url
-			if (argsObj.hasOwnProperty('0')) {
-				location.assign(argsObj[0]);
-			}
-			break;
-		case 'opentab': // open in new tab
-			var opencount = 0; // hard limiter
-			for(var n in argsObj) {
-				if (argsObj.hasOwnProperty(n) && !isNaN(n) && opencount<10) {
-					GM_openInTab(argsObj[n]);
-					opencount++;
-				}
-			}
-			break;
-		case 'help': // list all commands
-			var li = [].slice.call(mfs.c.cmdlist);
-			for (let key in mfs.c.cmdTable) {
-				if(mfs.c.cmdTable.hasOwnProperty(key)) li.push(key);
-			}
-			for (let key in mfs.c.addCmdTable) {
-				if(mfs.c.addCmdTable.hasOwnProperty(key)) li.push(key + '*');
-			}
-			li.sort();
-			mfs.c.print(li.join( argsObj.s ? '  ': '\n'));
-			mfs.c.print('* Custom command')
-			if (mfs.c.state.hasOwnProperty('helpURL')) {
-				mfs.c.fprint('Check out the <a href="$1" target="_blank">wiki page on Github</a>',[mfs.c.state.helpURL],3)
-			}
-			break;
-		case 'savevar': // commit vars to localstorage
-			GM_setValue('vars',JSON.stringify(mfs.c.vars));
-			if (!argsObj.noalias) GM_setValue('aliases', JSON.stringify(mfs.c.aliases) ); // save
-			mfs.c.print('Saved',3); 
-			break;
-		case 'resetvar': // reset var in localstorage
-			GM_setValue('vars', undefined);
-			if (!argsObj.noalias) GM_setValue('aliases', undefined); // save
-			mfs.c.print('Vars and aliases reset. Reload to take effect.',3); 
-			break;
-		case "global": // turns global mode on/off
-			mfs.c.vars.global = isNaN(argsObj[0])? 0 : Number(argsObj[0]) || 0;
-			mfs.c.globalSetup(mfs.c.vars.global);
-			break;
-			
-		default:
-			var done = false;
-			
-			// lookup command table
-			for(var key in mfs.c.cmdTable) {
-				if(mfs.c.cmdTable.hasOwnProperty(key) && cmd==key) {
-					mfs.c.cmdTable[key](argsObj);
-					done=true;
-					break;
-				}
-			}
-			
-			// additional commands
-			if (!done && mfs.c.addCmdTable) {
-				// goes through additional command list
-				for(var key in mfs.c.addCmdTable) {
-					if(mfs.c.addCmdTable.hasOwnProperty(key) && cmd===key) {
-						mfs.c.addCmdTable[key](argsObj);
-						done=true;
-						break;
-					}
-				}
-			}
-			
-			// aliases
-			if (!done && mfs.c.aliases && mfs.c.aliases.hasOwnProperty(cmd)) { // parse alias
-				console.log('found alias: ' + cmd);
-				// prepare array of commands
-				var cmdlist = mfs.c.aliases[cmd].split(';');
-				
-				// substitute arguments into command array NOW
-				for (var aj = 0; aj < cmdlist.length; aj++) {
-					cmdlist[aj] = mfs.c.util.txtfmt(cmdlist[aj], argsObj);
-				}
-				
-				// pass array to parseBatch for further, *proper* processing
-				mfs.c.parseBatch(cmdlist, true);
-				done = true;
-			}
-			
-			//if (!done) mfs.c.print('Unknown command: '+cmd,5);
-			if (!done) mfs.c.print(`Unknown command: ${cmd}`,5);
+	if (cmdMatches.length) {
+		cmdMatches[0].fn(argsObj);
+		
+	} else if (!done && mfs.c.aliases && mfs.c.aliases.hasOwnProperty(cmdName)) { // parse alias
+		// console.log('found alias: ' + cmdName);
+		// prepare array of commands
+		let cmdlist = mfs.c.aliases[cmdName].split(';');
+		
+		// substitute alias arguments into command array NOW
+		for (let aj = 0; aj < cmdlist.length; aj++) {
+			cmdlist[aj] = mfs.c.util.txtfmt(cmdlist[aj], argsObj);
+		}
+		
+		// pass array to parseBatch for further, *proper* processing
+		mfs.c.parseBatch(cmdlist, true);
+		
+	} else { 
+		mfs.c.print(`Unknown command: ${cmdName}`, 5);
 	}
 	
 	// chaining
-	if (batch && mfs.c.vars.cmd_chain && mfs.c.state.parseQueue.length) {
+	if (batch && mfs.c.fullVarObj().cmd_chain && mfs.c.state.parseQueue.length) {
 		mfs.c.state.parseQueue.shift();
 		mfs.c.processParseQueue();
 	}
 };
 
 // batch parsing
-// NOTE: special rule for alias commands - current command 
-//       (ought to be an alias cmd at idx 0) should be removed and replaced with the new commands
+// NOTE: special rule for alias commands
+//       current command (ought to be an alias cmd at idx 0) should be removed and replaced with the new commands
+//  also, alias is true when cmdArray came from expanding an alias
 mfs.c.parseBatch = function(cmdArray, alias) {
 	if (!cmdArray || !cmdArray.length) return;
 	
@@ -272,15 +304,12 @@ mfs.c.parseBatch = function(cmdArray, alias) {
 		mfs.c.state.parseQueue = [].concat(cmdArray, mfs.c.state.parseQueue);
 		mfs.c.processParseQueue();
 	} else if (mfs.c.vars.cmd_chain) { // chained
-		mfs.c.state.parseQueue = mfs.c.state.parseQueue.concat(cmdArray);
-		//console.log(mfs.c.state.parseQueue)
+		mfs.c.state.parseQueue = [].concat(mfs.c.state.parseQueue, cmdArray);
 		mfs.c.processParseQueue();
 		
 	} else { // non-chaining, timeout all at once
-		for(var i=0; i<cmdArray.length; i++) {
-			setTimeout( function parseTimeoutFn(s) { 
-				mfs.c.parse(s,true);
-			}, 0, cmdArray[i]);
+		for(var i = 0; i < cmdArray.length; i++) {
+			setTimeout( (s) => { mfs.c.parse(s, true) }, 0, cmdArray[i]);
 		}
 	}
 }
@@ -289,16 +318,22 @@ mfs.c.processParseQueue = function () {
 	if (!mfs.c.state.parseQueue.length) {
 		mfs.c.state.parseTimeoutID = 0;
 		return;
-	} else if (mfs.c.state.parseQueue.length>1000) {
+	} else if (mfs.c.state.parseQueue.length > 1000) {
 		console.log('WARNING: too many queued commands!!');
 		return;
 	}
 	
-	mfs.c.state.parseTimeoutID = setTimeout( function parseQueueFn(s){
+	/*
+	mfs.c.state.parseTimeoutID = setTimeout( (s) => {
 		console.log(`parsing queued command: ${s}`)
 		mfs.c.parse(s, true);
 		//mfs.c.state.parseQueue.shift();
-	}(mfs.c.state.parseQueue[0]), 0);
+	}, 0, mfs.c.state.parseQueue[0]);
+	*/
+	// trying out synchronous parsing of the queue, to get "for" to work correctly
+	while (mfs.c.state.parseQueue.length) {
+		mfs.c.parse(mfs.c.state.parseQueue.shift(), true);
+	}
 }
 
 // moved out from "exec" command
@@ -308,28 +343,28 @@ mfs.c.parseTimedBatch = function (s) {
 	var m; // match array
 	var t; // timestamp
 	var s; // command string
-	var tout=[]; // array for timeouts
-	var cmdlist=[]; // list of commands
+	var tout = []; // array for timeouts
+	var cmdlist = []; // list of commands
 	
 	for (var i = 0; i < lines.length; i++) {
 		m = rgx.exec(lines[i]);
 		if (!m) continue;
-		t = Number(m[1])||0; // timecode
+		t = Number(m[1]) || 0; // timecode
 		s = m[2].trim();     // the rest of the command
 		s = s.split('//')[0];// rmv comments
 		if (t > 0) { // timed, set timeout 
-			tout.push( setTimeout(function(s){mfs.c.parse(s,true);},t,s));
+			tout.push( setTimeout( (s) => {mfs.c.parse(s, true)}, t, s));
 		} else if (s) { // non-timed & non-empty, put in list
 			cmdlist.push(s);
 		}
 	}
 	// pass cmdlist to batch parser 
-	if (cmdlist.length) mfs.c.parseBatch(cmdlist) 
+	if (cmdlist.length) mfs.c.parseBatch(cmdlist);
 }
 
 // argument object constructor - the keystone of the script
 mfs.c.argObj = function (args) {
-	if(args.length==0) return {};
+	if(args.length === 0) return {};
 	
 	const pattern = /*mfs.c.state.regex.argx ||*/ /(?:^|\s+)(?:(['"])(.*?)\1|([\S]+|\d+))/g;
 	var match;
@@ -337,8 +372,12 @@ mfs.c.argObj = function (args) {
 	// [1]: quotes. don't use
 	// [2]: text inside quotes
 	// [3]: normal text including switch
-	const mStr = (match) => match[3] || match[2];
-	const mKey = (match) => match[3].substr(0,1) == '-' && isNaN(match[3].substr(1,1));
+	const mStr = (match) => {
+		let val = match[3] || match[2];
+		if (mfs.c.fullVarObj()['cmd_varsubst'] == 2) val = mfs.c.varSubst(val);		
+		return val;
+	};
+	const mKey = (match) => match[3] && match[3].length > 1 && match[3].substr(0, 1) == '-' && isNaN(match[3].substr(1));
 	
 	/*
 	var t = mfs.c.state.regex.arg || /(?:^|\s+)("([^\\"]*|\\.*)"|'([^\\']*|\\.*)'|-*[^\s]+)/g;
@@ -352,7 +391,8 @@ mfs.c.argObj = function (args) {
 	var c = 0;  // token counter (fixed limit of 200)
 	var key;
 	var expectValue = false; // flag next token as value to a key
-	var o = {}; // output object	
+	var o = {}; // output object
+	o._argStr = (mfs.c.fullVarObj()['cmd_varsubst'] === 2) ? mfs.c.varSubst(args): args;
 	
 	while(match = pattern.exec(args)) {
 		if(expectValue && mKey(match) ) {
@@ -380,21 +420,60 @@ mfs.c.argObj = function (args) {
 	return o;
 };
 
-mfs.c.varSubst = function (s) {
+// VARIABLE CONTROL SYSTEM
+// to control how exposed variables are retrieved and set
+
+mfs.c.pushVarStack = function() {
+	// make a deep copy of the top var object in the stack
+	let copy = JSON.parse(JSON.stringify(mfs.c.varStack[mfs.c.varStack.length-1]))
+	mfs.c.varStack.push(copy);
+	// fix mfs.c.var to point to the new top of stack
+	mfs.c.vars = mfs.c.varStack[mfs.c.varStack.length - 1];
+	console.log(`stack height: ${mfs.c.varStack.length}`);
+}
+mfs.c.popVarStack = function() {
+	if (mfs.c.varStack.length > 1) mfs.c.varStack.pop();
+	// fix mfs.c.var to point to the new top of stack
+	mfs.c.vars = mfs.c.varStack[mfs.c.varStack.length - 1];
+	console.log(`stack height: ${mfs.c.varStack.length}`);
+}
+
+// returns a copy of the full variable collection, including dynamic ones
+mfs.c.fullVarObj = function() {
 	// gets a copy of the vars JSON object
-	var varObj = JSON.parse(JSON.stringify(mfs.c.vars));
+	let varObj = JSON.parse(JSON.stringify(mfs.c.vars));
 	
 	// initialize other stuff
-	var now = new Date();
+	const now = new Date();
 	
-	// adds special dynamic vars
-	varObj.location = varObj.location || location.href;
-	varObj.fulldate = varObj.fulldate || now.toString();
-	varObj.date = varObj.date || now.toDateString();
-	varObj.time = varObj.time || now.toTimeString();
-	varObj.ver = varObj.ver || mfs.c.state.ver;
-	
+	// dynamic vars
+	const dynamicVars = {
+		location: location.href,
+		fulldate: now.toString(),
+		date: now.toDateString(),
+		time: now.toTimeString(),
+		ver: mfs.c.state.ver,
+		oLocation: location,
+		oDate: now
+	};
+	// adds dynamic vars to varObj, but then let varObj overwrite those vars
+	return Object.assign({}, dynamicVars, varObj);
+}
+
+mfs.c.getVar = function(name) {
+	//probably moot now
+}
+mfs.c.setVar = function(name, value) {
+	// so is this
+}
+
+mfs.c.varSubst = function (s) {
+	// retrieves the full variable collection
+	// note: method used to be here; moved to provide dynamic vars elsewhere
+	var varObj = mfs.c.fullVarObj();
+
 	// go and subst
+	// TODO: REPLACE THIS TO SUPPORT inclusion of JSON objects into the string
 	s = mfs.c.util.txtfmt2(s, varObj);
 	return s;
 }
@@ -402,9 +481,13 @@ mfs.c.varSubst = function (s) {
 // PRINT ROUTINE
 // s: the string to print
 // type: see the var typedef below
-// htmlescape: whether to escape html (certain commands prints html fragments)
-// fromGlobal: if true, do not propagate
-mfs.c.print = function(s, type, htmlescape, fromGlobal) {
+// options: can hold the following properties:-
+//   htmlescape: whether to escape html (certain commands prints html fragments)
+//   fromGlobal: if true, do not propagate
+//   parseMarkdown: parses partial markdown syntax
+//   clearLastLine: replaces last line with this
+//   append: append to last line
+mfs.c.print = function(str, type, options = {}) {
 	const typedef = { // type definition
 		0: 'normal',
 		1: 'input',
@@ -412,35 +495,61 @@ mfs.c.print = function(s, type, htmlescape, fromGlobal) {
 		3: 'info',
 		4: 'warn',
 		5: 'error',
-		6: 'important'
+		6: 'important',
+		99: 'debug',
+		normal: 'normal',
+		input: 'input',
+		text: 'textdump',
+		textdump: 'textdump',
+		info: 'info',
+		warn: 'warn',
+		warning: 'warn',
+		error: 'error',
+		important: 'important',
+		debug: 'debug'
 	};
-	var blackliststr = mfs.c.vars.blacklist || "";
+	var blackliststr = mfs.c.fullVarObj().blacklist || "";
 	var blacklist = blackliststr.split("|");
 	var now = new Date();
 	
+	// set type 
 	if (typeof type === 'undefined') type = 0;
-	stype = typedef.hasOwnProperty(type) ? typedef[type] : 'normal';
-	var oel = document.createElement('span');
-	oel.className="lnoutput " + stype;
-	oel.dataset.timestamp = now.toUTCString();
-	oel.dataset.timetext = now.toLocaleTimeString();
-	lines = s.replace(/\t/g,'    ').split('\n');
+	var stype = typedef.hasOwnProperty(type) ? typedef[type] : 'normal';
 	
-	if (htmlescape) {
-		for (var i=0; i<lines.length; i++) {
-			for (var j=0; j<blacklist.length; j++) {
-				lines[i] = lines[i].replace(blacklist[j], "¦".repeat(blacklist[j].length) );
+	let oel;
+	// [optional] parse markdown
+	if (options.parseMarkdown) str = mfs.c.util.markdown(str);
+	// [optional] remove last output child
+	if (options.clearLastLine) {
+		mfs.c.output.lastElementChild.remove();
+	}
+	
+	// setup output element
+	if (options.append) {o
+		oel = mfs.c.output.lastElementChild;
+	} else {
+		oel = document.createElement('span');
+		oel.className = "lnoutput " + stype;
+		oel.dataset.timestamp = now.toUTCString();
+		oel.dataset.timetext = now.toLocaleTimeString();
+	}
+	
+	lines = str.replace(/\t/g,'    ').split('\n');
+	if (options.htmlEscape) {
+		for (let line of lines) {
+			for (let blacklistItem of blacklist) {
+				line = line.replace(blacklistItem, "¦".repeat(blacklistItem.length) );
 			}
-			oel.appendChild(document.createTextNode(lines[i]));
+			oel.appendChild(document.createTextNode(line));
 			oel.appendChild(document.createElement('br'));
 		}
-	} else { oel.innerHTML+=lines.join('<br/>'); }
+	} else { oel.innerHTML += lines.join('<br/>'); }
 	mfs.c.output.appendChild(oel);
 	
 	// scroll to element (FF only!)
 	oel.scrollIntoView();
 	
-	if ( mfs.c.util.isGlobalPoster() && !fromGlobal ) {
+	if ( mfs.c.util.isGlobalPoster() && !options.fromGlobal ) {
 		console.log('adding item to printcache here...')
 		var now = new Date(),
 			jsonow = now.toJSON(),
@@ -454,10 +563,6 @@ mfs.c.print = function(s, type, htmlescape, fromGlobal) {
 		console.log(mfs.c.state.printcache);
 	}
 };
-mfs.c.fprint=function(s,args,type) {
-	mfs.c.print( mfs.c.util.txtfmt(s,args), type);
-};
-
 
 // COMMAND ADD-IN PARSER SUB
 // custom cmds in a object array
@@ -466,21 +571,56 @@ mfs.c.parseAddCmds = function() {
 	if (!mfs.c.customCommands.length) return;
 	var list = mfs.c.customCommands,		
 		tbl = mfs.c.addCmdTable;
-	for (var i=0; i< list.length; i++) {
-		if(typeof list[i]!= 'object' || typeof list[i].name != 'string' || typeof list[i].fn != 'function') {
+	for (let i = 0; i < list.length; i++) {
+		if(typeof list[i] != 'object' || typeof list[i].name != 'string' || typeof list[i].fn != 'function') {
 			mfs.c.print('Error: Invalid data type for custom command list item #' +i, 5);
 		} else if (tbl[ list[i].name ]) {
 			mfs.c.print('Error: Custom command of that name already exists! item #' + i,5);
 		} else {
 			tbl[ list[i].name ] = list[i].fn;
 		}
+		
+		// for the new commands collection
+		mfs.c.registerAddCommand(list[i]);
 	}
 }
+
+// handles addition of custom commands
+mfs.c.registerAddCommand = function(obj) {
+	let outObj = {custom: true};
+	
+	// check that namespace is provided
+	if (!obj.namespace) {
+		console.log('Error registering custom command: no namespace provided (required)');
+		return false;
+	}
+	
+	// check that name(s) are provided
+	if (Array.isArray(obj.names)) {
+		outObj.names = obj.names;
+	} else if (obj.name) {
+		outObj.name = obj.name;
+	} else {
+		console.log('Error registering custom command: no name (required)');
+		return false;
+	}
+	
+	// copy the rest of the properties
+	outObj.description = obj.description;
+	outObj.helpText = obj.helpText;
+	outObj.argSpec = obj.argSpec;
+	outObj.fn = obj.fn;
+	
+	// push command object
+	mfs.c.commands.push(outObj);
+	return true;
+}
+
 
 // GLOBAL system
 mfs.c.globalFocus = function () {
 	// on focus, set the global poster ref, and get the stored printcache
-	if ( mfs.c.vars.global && document.visibilityState === 'visible') {
+	if ( mfs.c.fullVarObj().global && document.visibilityState === 'visible') {
 		GM_setValue('globalPosterRef', location.href);
 		mfs.c.state.printcache = JSON.parse(GM_getValue('printcache','[]'));
 	}
@@ -492,14 +632,13 @@ mfs.c.globalInterval = function () {
 		var activecache = mfs.c.state.printcache || [];
 		
 		// poster is in charge of clearing the print cache
-		for (var i=activecache.length-1; i>=0; i--) {
+		for (var i = activecache.length - 1; i >= 0; i--) {
 			var printtime = new Date(activecache[i].time)
 			if (now - printtime > 10000) { // past 10 seconds
 				activecache.splice(i,1); // remove
 			}
 		}
 		GM_setValue('printcache', JSON.stringify(activecache) );
-		//console.log(location.href, activecache);
 		
 	} else { // listener
 		var listencache = JSON.parse(GM_getValue('printcache','[]'));
@@ -508,10 +647,8 @@ mfs.c.globalInterval = function () {
 		// see if there's new stuff cached
 		for (var i = 0; i < listencache.length; i++) {
 			var data = listencache[i];
-			if (owncache.findIndex(function(item){
-				return item.time === data.time
-			}) < 0 ) { // if item in listencache doesn't exist in owncache
-				mfs.c.print(data.s, data.type, data.htmlescape);
+			if (owncache.findIndex( item => item.time === data.time ) < 0 ) { // if item in listencache doesn't exist in owncache
+				mfs.c.print(data.s, data.type, {htmlEscape: data.htmlescape} );
 				owncache.push(data);
 			}
 		}
@@ -522,60 +659,62 @@ mfs.c.globalInterval = function () {
 mfs.c.globalSetup = function (val = false) {
 	if (val) {
 		// listen for focus
-		document.addEventListener('visibilitychange', function visChange(e) {mfs.c.globalFocus() } );
-		mfs.c.globalIntervalID = setInterval( function globalIntervalFn() {mfs.c.globalInterval() }, Number(mfs.c.vars.globalInterval)||1000 );
+		document.addEventListener('visibilitychange', (e) => { mfs.c.globalFocus() } );
+		mfs.c.globalIntervalID = setInterval( () => { mfs.c.globalInterval() }, Number(mfs.c.fullVarObj().globalInterval)||1000 );
 		mfs.c.globalFocus(); // assume page that runs this is in focus
 		mfs.c.print('Global mode enabled', 3);
 	} else {
-		document.removeEventListener('visibilitychange', function visChange(e) {mfs.c.globalFocus() } );
+		document.removeEventListener('visibilitychange', (e) => { mfs.c.globalFocus() } );
 		clearInterval(mfs.c.globalIntervalID);
 		mfs.c.print('Global mode disabled', 3);
 	}
 	
 }
 
-
 // MAIN INITIALIZATION ROUTINE
 mfs.c.init = function () {
+	const c = mfs.c;
 	// Stage 1: container and iframe first
-	mfs.c.container = document.createElement('div');
-	mfs.c.container.id = "mfs-c-container";
+	c.container = document.createElement('div');
+	c.container.id = "mfs-c-container";
 	
-	mfs.c.frame = document.createElement('iframe');
-	mfs.c.frame.id = 'mfs-c-frame';
+	c.frame = document.createElement('iframe');
+	c.frame.id = 'mfs-c-frame';
 	
-	mfs.c.styleEl = document.createElement('style');
-	mfs.c.styleEl.innerHTML = GM_getResourceText('containerStyle');
+	c.styleEl = document.createElement('style');
+	c.styleEl.innerHTML = GM_getResourceText('containerStyle');
 	
 	// stage 2: inside the iframe
-	mfs.c.frame.addEventListener('load', function consoleFrameLoad(e) {
-		//var fbody = mfs.c.frame.contentDocument.body;
+	c.frame.addEventListener('load', function consoleFrameLoad(e) {
+		const frameDoc = c.frame.contentDocument;
 		
-		mfs.c.input = mfs.c.frame.contentDocument.createElement('input');
-		mfs.c.input.type = 'text';
-		mfs.c.input.id   = 'mfs-c-input';
-		mfs.c.histDOM = mfs.c.frame.contentDocument.createElement('datalist');
-		mfs.c.histDOM.id = 'mfs-c-inputlist';
-		mfs.c.input.setAttribute('list','mfs-c-inputlist');
+		c.input = frameDoc.createElement('input');
+		c.input.type = 'text';
+		c.input.id   = 'mfs-c-input';
+		c.histDOM = frameDoc.createElement('datalist');
+		c.histDOM.id = 'mfs-c-inputlist';
+		c.input.setAttribute('list','mfs-c-inputlist');
 	
-		mfs.c.output = mfs.c.frame.contentDocument.createElement('div');
-		mfs.c.output.id  = 'mfs-c-output';
+		c.output = frameDoc.createElement('div');
+		c.output.id  = 'mfs-c-output';
 	
-		mfs.c.frameStyleEl = mfs.c.frame.contentDocument.createElement('style');
-		mfs.c.frameStyleEl.innerHTML = GM_getResourceText('iframeStyle');
+		c.frameStyleEl = frameDoc.createElement('style');
+		c.frameStyleEl.innerHTML = GM_getResourceText('iframeStyle');
 		
-		mfs.c.frame.contentDocument.body.appendChild(mfs.c.input);
-		mfs.c.frame.contentDocument.body.appendChild(mfs.c.histDOM);
-		mfs.c.frame.contentDocument.body.appendChild(mfs.c.output);
-		mfs.c.frame.contentDocument.head.appendChild(mfs.c.frameStyleEl);
+		frameDoc.head.appendChild(c.frameStyleEl);
+		frameDoc.body.appendChild(c.input);
+		frameDoc.body.appendChild(c.histDOM);
+		frameDoc.body.appendChild(c.output);
 		
 		// add keypress event listener to the iframe
-		mfs.c.frame.contentWindow.addEventListener('keypress', function consoleKeypress(e){
+		c.frame.contentWindow.addEventListener('keypress', function consoleKeypress(e) {
 			// check if toggle key is pressed
-			if(e.key===mfs.c.state.togglekey && e.ctrlKey==false) {
-				mfs.c.state.visible=!mfs.c.state.visible;
-				mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
-				mfs.c.input.blur();
+			if (e.key === c.state.togglekey && e.ctrlKey == false) {
+				e.preventDefault();
+				
+				c.state.visible = !c.state.visible;
+				c.container.style.display = (c.state.visible) ? "block" : "none";
+				c.input.blur();
 				
 				// all these to get focus back to parent
 				var meh = document.createElement('input');
@@ -586,60 +725,58 @@ mfs.c.init = function () {
 				meh.focus();
 				meh.blur();
 				document.body.removeChild(meh);
-				
-				e.preventDefault();
 			}
 
 			// now check if user presses enter
-			if (mfs.c.input.value.length==0) return false;
-			if (e.key=="Enter" || e.key=="Return") {
-				mfs.c.parse(mfs.c.input.value);
-				mfs.c.input.value="";
-			} else if (e.key=="Escape") {
-				mfs.c.input.value="";
+			if (!c.input.value.length) return false;
+			if (e.key == "Enter" || e.key == "Return") {
+				c.parse(c.input.value);
+				c.input.value = "";
+			} else if (e.key == "Escape") {
+				c.input.value = "";
 			}
 		});
 		
-		mfs.c.output.addEventListener('click', function consoleClick(e) {
+		c.output.addEventListener('click', function consoleClick(e) {
 			var t = e.target;
-			while (t != mfs.c.output) { // traverse the DOM
+			while (t != c.output) { // traverse the DOM
 				//t.className.match(/\binput\b/ig)
 				if (t.classList.contains('input')) {
-					mfs.c.input.value = t.innerText;
+					c.input.value = t.innerText;
 					return;
 				} else if (t.classList.contains('cmd')) {
 					var cmdlist = t.dataset.cmd.split(';');
-					mfs.c.parseBatch(cmdlist);
+					c.parseBatch(cmdlist);
 					return;
 				} else {t = t.parentNode;}
 			}
 		});
 		
-		mfs.c.print([mfs.c.state.title, mfs.c.state.ver].join(' '));
-		mfs.c.cmd.time({});
+		c.print([c.state.title, c.state.ver].join(' '));
+		c.cmd.time({});
 		// run autoexec
 		var autoexec = GM_getValue('autoexec') || GM_getResourceText('autoexec');
-		if (autoexec) mfs.c.parseTimedBatch(autoexec);
+		if (autoexec) c.parseTimedBatch(autoexec);
 		
-		mfs.c.state.loaded = true;
+		c.state.loaded = true;
 		console.log('mfs js console loaded');
-		if(mfs.c.state.visible) mfs.c.input.focus();
+		if(c.state.visible) c.input.focus();
 	});	
 	
 	// append everything into place
-	mfs.c.container.appendChild(mfs.c.frame);
-	document.body.appendChild(mfs.c.container);
-	document.head.appendChild(mfs.c.styleEl);
-	mfs.c.container.style.display="none";
+	c.container.appendChild(c.frame);
+	document.body.appendChild(c.container);
+	document.head.appendChild(c.styleEl);
+	c.container.style.display = "none";
 	
 	// some other subs to call
-	mfs.c.parseAddCmds();
-	if (mfs.c.vars.global) {mfs.c.globalSetup(mfs.c.vars.global);}
+	c.parseAddCmds();
+	if (c.vars.global) {c.globalSetup(c.vars.global)}
 };
 
 // listen for toggle key on parent page
 document.addEventListener('keypress', function pageKeypress(e) {
-	if (e.key!==mfs.c.state.togglekey || e.ctrlKey) {
+	if (e.key !== mfs.c.state.togglekey || e.ctrlKey) {
 		//fires just the togglekey without the ctrl
 		// idk how to make this work :(
 		var raised = new KeyboardEvent('keypress', {key:'`'});
@@ -653,12 +790,12 @@ document.addEventListener('keypress', function pageKeypress(e) {
 		// mfs.c.parseAddCmds();
 	}
 	
-	mfs.c.state.visible=!mfs.c.state.visible;
+	mfs.c.state.visible = !mfs.c.state.visible;
 	mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
 	if(mfs.c.state.visible) mfs.c.input.focus();
 });
 
-if (mfs.c.vars.initOnPageLoad) {mfs.c.init();}
+if (mfs.c.vars.initOnPageLoad) mfs.c.init();
 
 //if (mfs.c.util) {console.log('util module is loaded')}
 //if (mfs.c.cmd) {console.log('cmd module is loaded')}

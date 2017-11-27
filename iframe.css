@@ -31,21 +31,29 @@ body {
 #mfs-c-output .lnoutput {
     display: block;
     min-height: 1em;
+	white-space: pre-wrap;
 }
 #mfs-c-output .normal {}
 #mfs-c-output .input,
-#mfs-c-output .input:before {
+#mfs-c-output .input:before { 
     color: lime;
+	cursor: pointer;
 }
-#mfs-c-output .input:before {
-	content: "]"
+#mfs-c-output .cmd,
+#mfs-c-output .cmd:before,
+#mfs-c-output .cmd:after {
+	color: #9999ff;
+	cursor: pointer;
 }
+#mfs-c-output .cmd:before {content: "[" }
+#mfs-c-output .cmd:after,
+#mfs-c-output .input:before { content: "]" }
 
 :link { color: #9999ff }
 :visited { color: #7676c0 }
 :link:hover, :visited:hover { color: #ccccff}
 #mfs-c-output .textdump {
-    color: #fff
+    color: #fff;
 }
 #mfs-c-output .info {
     color: #a4e9ff

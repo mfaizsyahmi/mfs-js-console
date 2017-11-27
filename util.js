@@ -11,29 +11,42 @@ mfs.c.util.addslashes = function( str ) {
 }
 
 mfs.c.util.txtfmt = function(s, ar) { // formats text, replace $n with array of strings (1-based)
-	for(var x=1; ; x++ ) {
-		if (!ar.hasOwnProperty(x-1)) {break}
-		s = s.replace( '$'+x, ar[x-1] || '');
+	for(let x = 1; ; x++ ) {
+		if (!ar.hasOwnProperty(x - 1)) {break}
+		s = s.replace( '$'+x, ar[x - 1] || '');
 	}
 	return s;
-};
+}
+
 mfs.c.util.txtfmt2 = function(s, obj) { // formats text, but with named arguments (used to subst variables)
 	//if (typeof s !== 'string') return;
 	
 	// first pass - replace all variables within curly brackets (a-la Apache)
-	for(var n in obj) {
-		if (obj.hasOwnProperty(n)) {
-			s = s.replace('${'+n+'}', obj[n]);
+	// todo: replace loop - loop the string instead of the vars
+	/*for (let n in obj) {
+		if !(obj.hasOwnProperty(n)) continue;
+		s = s.replace('${'+n+'}', obj[n]);
+	}*/
+	const replacer = (p1) => {
+		let val = mfs.c.util.objectNotationValue(obj, p1, true);
+		console.log(val, typeof val === 'function');
+		if (Array.isArray(val) || (typeof val === 'object' && val.constructor === Object)) {
+			val = JSON.stringify(val);
+		} else if (typeof val === 'function') {
+			val = val();
 		}
-	}
+		return val;
+	};
+	s = s.replace(/\${(.*?)}/g, replacer);
 	// second pass - replace variables *without* curly brackets
-	for(var n in obj) {
+	for(let n in obj) {
 		if (obj.hasOwnProperty(n)) {
 			s = s.replace('$'+n, obj[n]);
 		}
 	}
 	return s;
-};
+}
+mfs.c.util.textFormatter = function(s, obj) {mfs.c.util.txtfmt2(s, obj)}
 
 mfs.c.util.typeEscape = function(s) {
 	var map = {
@@ -54,7 +67,6 @@ mfs.c.util.typeEscape = function(s) {
 // returns html fragment text of anchor tag
 mfs.c.util.htmlLink = function(uri, s) {
 	if(typeof s=='undefined'){s=uri;}
-	//return mfs.c.util.txtfmt('<a href="$1" target="_blank">$2</a>',[uri,s]);
 	return `<a href="${uri}" target="_blank">${s}</a>`;
 };
 
@@ -179,7 +191,6 @@ mfs.c.util.dlImg = function(imgEl,imgtype,callback) {
 		var a = document.createElement('a');
 		a.download = (name||'image') + ext;
 		a.href=dataURL.replace(himgtype, 'application/x-mfsconsoleimage');
-		//console.log(img, dataURL.replace('image/png','application/mfs-c-png'));
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
@@ -245,18 +256,53 @@ mfs.c.util.expr_tokenizer = function(s) {
 	}
 }*/
 
+// adapted from MDN
+mfs.c.util.delayedResolve = function(duration, value) { 
+  return new Promise(resolve => {
+    setTimeout(() => {
+      resolve(value);
+    }, duration);
+  });
+};
+
 // parse dot notation
-mfs.c.util.dotGetValue = function(obj, str, own) {
+mfs.c.util.dotGetValue = function (obj, str, own) {
 	var part = str.split('.'),
 		cur = obj;
 	for (var i=0; i<part.length; i++) {
-		if ( (own)? obj.hasOwnProperty(part[i]): true && cur[part[i]]) {
+		if ( (own)? cur.hasOwnProperty(part[i]): true && cur[part[i]]) {
 			cur = cur[part[i]];
 		} else {
 			return undefined;
 		}
 	}
 	return cur;
+}
+
+mfs.c.util.objectNotationValue = function (obj, str, own, ref) {
+	const pattern = /(?:(?:^|\b|\.)(\w+)(?:\b)|\[(['"]?)(.*?)\2\])/g;
+	const mStr = (match) => match[3] || match[1];
+	const allowedMethods = ['toString', 'toDateString', 'toTimeString', 'toLocaleDateString', 'toLocaleTimeString'];
+	// reference object. properties:
+	//   obj: the parent object (analogous to "this")
+	//   key: the last key in the notation
+	//   use this to access the properties in mfs.c.vars and their children
+	var refObj = {obj, key: str};
+	var cur = obj;
+	var match;
+	while (match = pattern.exec(str)) {
+		let part = mStr(match);
+		if ( (own)? cur.hasOwnProperty(part): true && cur[part]) {
+			refObj = {obj: cur, key: part};
+			cur = cur[part];
+		} else if (allowedMethods.includes(part) && typeof cur[part] === 'function') {
+			refObj = {obj: cur, key: part};
+			cur = cur[part];
+		} else {
+			return (ref)? refObj : undefined;
+		}
+	}
+	return (ref)? refObj : cur;
 }
 
 mfs.c.util.displayElementAttr = function(val, attrlist) {

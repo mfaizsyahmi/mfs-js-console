@@ -30,14 +30,13 @@ mfs.c.cmd.time = function(argObj) {
 //  dims: show dimensions in output
 //  thumb: output as thumbnails
 mfs.c.cmd.listimg = function(args) {
-	let outToVar = !!(args.outputvar || args.o);
+	let outToVar = !!(args.outputvar || args.o || false);
 	// main function, called as callback to ajax later in this fn
 	let listimgCallback = function(docObj, args) {
 		let o = [];
 		let domlist = docObj.getElementsByTagName('img');
 		let imgarray = [].slice.call(domlist);
-		if (!outToVar) mfs.c.print(docObj.title + ' - ' + imgarray.length + ' images:');
-		for(let i = 0; i < imgarray.length; i++) {	
+		for(let i = 0, c = 1; i < imgarray.length; i++) {	
 			//filter properties
 			if (imgarray[i].width < args.w || imgarray[i].width > args.W) continue;
 			if (imgarray[i].height < args.h || imgarray[i].height > args.H) continue;
@@ -51,25 +50,30 @@ mfs.c.cmd.listimg = function(args) {
 			if (outToVar) {
 				o.push(src);
 			} else if (args.thumb) {
-				o.push('<span class="lnoutput mfs-c-gallery">' +(i+1)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank"><img src="' +src+ '" style="max-width:150px"/></a></span>');
+				//o.push('<span class="lnoutput mfs-c-gallery">' +(c)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank"><img src="' +src+ '" style="max-width:150px"/></a></span>');
+				o.push(`<span class="lnoutput mfs-c-gallery">${c}: <a href="${src}" title="${src}" target="_blank"><img src="${src}" style="max-width:150px"/></a></span>`);
 			} else {
-				o.push('<span class="lnoutput normal">' +(i+1)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank">' +s+ '</a>' +dims+ '</span>');
+				//o.push('<span class="lnoutput normal">' +(c)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank">' +s+ '</a>' +dims+ '</span>');
+				o.push(`<span class="lnoutput normal">${c}: <a href="${src}" title="${src}" target="_blank">${s}</a>${dims}</span>`);
 			}
+			c++;
 		}
 		if (outToVar) {
 			mfs.c.util.outputVarOrPrint(args, o);
 		} else {
+			mfs.c.print(`${docObj.title} - ${o.length} matching images:`);			
 			mfs.c.output.innerHTML += o.join('');
 		}
+		console.log(o);
 	};
 	
 	// Async ajax layer for imglist. Allows ajax load of another document uri on which imglist is performed
 	if(args[0]) {
 		mfs.c.util.ajax(args[0], (r) => {
-			if(r.status===200) {
+			if(r.status === 200) {
 				listimgCallback(r.responseXML, args);
 			} else {
-				mfs.c.print('Error loading ' + args[0] + ' : ' + r.status,5);
+				mfs.c.print(`Error loading ${args[0]} : ${r.status}`, 5);
 			}
 		}, {responseType:'document'});
 	} else {
@@ -95,7 +99,7 @@ mfs.c.cmd.dlimg = function(args) {
 		var s = args[0],
 		numrange = [],
 		rgx = /*mfs.c.state.regex.filename4 ||*/ /([^/\\&\?]+)(\.\w{3,4})(?=([\?&].*$|$))/,
-		s = (mfs.c.vars["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
+		s = (mfs.c.fullVarObj()["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
 		//console.log(sp);
 		
 		if (typeof args[3]!== 'undefined') { // more than three arguments, assume list of items
@@ -256,7 +260,7 @@ mfs.c.cmd.genlinks = function(argObj) {
 	var s = argObj[0],
 		numrange = [],
 		rgx = /*mfs.c.state.regex.filename4 ||*/ /([^/\\&\?]+)(\.\w{3,4})(?=([\?&].*$|$))/,
-		sp = (mfs.c.vars["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
+		sp = (mfs.c.fullVarObj()["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
 		//console.log(sp);
 		
 	if(typeof argObj[3]!== 'undefined') { // more than three arguments, assume list of items
@@ -292,13 +296,12 @@ mfs.c.cmd.type = function(argObj) {
 		mfs.c.print('Not enough arguments',5);
 		return false;
 	}
-	mfs.c.util.ajax(argObj[0],function(r){
-		if(r.status==200) {
+	mfs.c.util.ajax(argObj[0], (r) => {
+		if (r.status === 200) {
 			var s = decodeURI(encodeURI(r.responseText));
-			
 			mfs.c.util.outputVarOrPrint(argObj, s);
 		} else {
-			mfs.c.print('Error loading ' +argObj[0]+ ' : ' +r.status+ ' - ' +r.statusText,5);
+			mfs.c.print(`Error loading ${argObj[0]} : ${r.status} - ${r.statusText}`, 5);
 		}
 	});
 };
@@ -309,9 +312,9 @@ mfs.c.cmd.exec = function(argObj) {
 		mfs.c.print('Not enough arguments',5);
 		return false;
 	}
-	mfs.c.util.ajax(argObj[0], function(r){
-		if(r.status==200) {
-			mfs.c.parseTimedBatch(r.responseText)
+	mfs.c.util.ajax(argObj[0], function(r) {
+		if(r.status == 200) {
+			mfs.c.parseTimedBatch(r.responseText);
 		} else {
 			mfs.c.print('Error loading ' + argObj[0] + ' : ' + r.status, 5);
 		}
@@ -321,27 +324,28 @@ mfs.c.cmd.exec = function(argObj) {
 // alias - register an alias
 // args: [0] - alias name
 //       [1] - string of commands
+// also processes "unalias" command
 mfs.c.cmd.alias = function(argObj) {
 	if (!argObj[0]) { // print list of aliases 
 		var alist = [];
 		for (var a in mfs.c.aliases) {
-			if (mfs.c.aliases.hasOwnProperty(a)) { alist.push( [a, '"' + mfs.c.aliases[a] +'"' ].join(': ') ) }
+			if (mfs.c.aliases.hasOwnProperty(a)) alist.push( `${a}: "${mfs.c.aliases[a]}"`)
 		}
 		alist.sort();
 		var count = alist.length || 0;
-		mfs.c.fprint('$1 aliases in total', [count.toString()], 3);
+		mfs.c.print(`${count} aliases in total`, 3);
 		if (alist.length) { mfs.c.print( alist.join('\n') ); }
 		
-	} else if (!argObj[1] || (argObj.hasOwnProperty('commandName') && argObj.commandName==='unalias') ) { // remove alias
-		if (mfs.c.aliases.hasOwnProperty(argObj[0]) ) {delete mfs.c.aliases[ argObj[0] ];}
-		mfs.c.print('Cleared alias. "savevar" to make permanent.',3);
+	} else if (!argObj[1] || (argObj._commandName && argObj._commandName === 'unalias') ) { // remove alias
+		if (mfs.c.aliases.hasOwnProperty(argObj[0]) ) delete mfs.c.aliases[ argObj[0] ];
+		mfs.c.print('Cleared alias. "savevar" to make permanent.', 3);
 		
 	} else if (argObj[1]) { // add alias
 		//if (mfs.c.cmdTable.hasOwnProperty(argObj[0]) || mfs.c.addCmdTable.hasOwnProperty(argObj[0]) ) {
 		//	mfs.c.print('Created/updated alias. "savevar" to make permanent.',3);
 		//} else {
 			mfs.c.aliases[ argObj[0] ] = argObj[1]; // always override existing aliases
-			mfs.c.print('Created/updated alias. "savevar" to make permanent.',3);
+			mfs.c.print('Created/updated alias. "savevar" to make permanent.', 3);
 		//}
 	}
 };
@@ -352,17 +356,22 @@ mfs.c.cmd.alias = function(argObj) {
 //  -append: adds to string/array
 //  -add: adds to number
 mfs.c.cmd.vars = function(argsObj) {
+	const isArr = obj => Array.isArray(obj);
+	const isObj = obj => (typeof obj === 'object' && obj.constructor === Object);
+	
 	if (!argsObj[0]) {  // print vars
 		var varlist = [];
-		for(let key in mfs.c.vars) {
-			let val = (mfs.c.vars.hasOwnProperty(key)) ? mfs.c.vars[key] : null;
-			if (Array.isArray(val)) { // value is array
-				/*for (let i = 0; i < val.length; i++) { // loop through array
+		for(let key in mfs.c.fullVarObj()) {
+			let val = (mfs.c.fullVarObj().hasOwnProperty(key)) ? mfs.c.fullVarObj()[key] : null;
+			if (isArr(val)) { // value is array
+				/*
+				for (let i = 0; i < val.length; i++) { // loop through array
 					varlist.push(`${key}[${i}] = ${val[i]}`);
 				}*/
 				varlist.push(`${key} = Array ${JSON.stringify(val)}`);
-			} else if (typeof val === 'object' && val.constructor === Object) { // type is object
-				/*for (let objKey in val) {
+			} else if (isObj(val)) { // type is object
+				/*
+				for (let objKey in val) {
 					varlist.push(`${key}[${objKey}] = ${val[objKey]}`);
 				}*/
 				varlist.push(`${key} = Object ${JSON.stringify(val)}`);
@@ -375,8 +384,18 @@ mfs.c.cmd.vars = function(argsObj) {
 	} else { // set var
 		let key = argsObj[0];
 		
+		// translates object notation in key and returns a reference to the children of mfs.c.vars as defined in said notation
+		// eg. if mfs.c.vars.testobj is object "testobj.child" points to testobj with child as key
+		// if object notation traversal fail will return the last found object, or full key (including dot) if none found
+		// properties:
+		//   obj: reference to the parent object
+		//   key: name of the last key
+		let target = mfs.c.util.objectNotationValue(mfs.c.fullVarObj(), key, true, true);
+		console.log(target);
+		//return // debug
+		
 		let value;
-		if (argsObj[1]==='$' && argsObj[3]) { // args satisfy query syntax
+		if (argsObj[1] === '$' && argsObj[3]) { // args satisfy query syntax
 			// do a query selection and get the attribute value
 			let nl = document.querySelectorAll(argsObj[2]);
 			let i = argsObj.offset || 0;
@@ -394,7 +413,7 @@ mfs.c.cmd.vars = function(argsObj) {
 		} else if (argsObj.prompt) { // prompt value
 			value = prompt(`Enter value for variable "${key}"`);
 		} else { // ordinary value 
-			value = argsObj[1] || undefined 
+			value = argsObj[1];
 		}
 		
 		// try to parse json
@@ -406,95 +425,171 @@ mfs.c.cmd.vars = function(argsObj) {
 		}
 		value = isNaN(value)? value: Number(value); //conv to number if possible
 		
-		if (argsObj.append && Array.isArray(mfs.c.vars[key])) { // append mode on array
-			mfs.c.vars[key].push(value);
-		} else if (argsObj.append && typeof mfs.c.vars[key] === 'string') { // append mode on string
-			mfs.c.vars[key] += value;
-		} else if (argsObj.add && !isNaN(mfs.c.vars[key]) ) { // add on number
-			mfs.c.vars[key] += value;
+		if (argsObj.append && isArr(target.obj[target.key])) { // append mode on array
+			target.obj[target.key].push(value);
+		} else if (argsObj.append && typeof target.obj[target.key] === 'string') { // append mode on string
+			target.obj[target.key] += value;
+		} else if (argsObj.append && typeof isObj(target.obj[target.key]) && isObj(value)) { // append on object
+			Object.assign(target.obj[target.key], value);
+		} else if (argsObj.add && !isNaN(target.obj[target.key]) ) { // add on number
+			target.obj[target.key] += value;
+		} else if (argsObj.delete || argsObj.delet) { // DELET THIS
+			delete target.obj[target.key];
 		} else {
-			mfs.c.vars[key] = value;
+			target.obj[target.key] = value;
 		}
-		mfs.c.print(`${key} = ${JSON.stringify(mfs.c.vars[key])}`);
+		mfs.c.print(`${key} = ${JSON.stringify(target.obj[target.key])}`);
 	}
 	
 }
 
 
 // if. finally a way to construct basic logic in the console.
+// supports logic chaining. see below
 // arguments:
-//  [0]: string1 OR regexp
-//  [1]: comparison operator OR the word "in"
-//  [2]: string2
-//  [3]: command if true
-//  [4]: the word "else"
-//  [5]: command if false
+//  [n + 0]: string1 OR regexp
+//  [n + 1]: comparison operator
+//  [n + 2]: string2
+//  [n + 3]: command if true
+//  [n + 4]: the word "else"
+//  [n + 5]: command if false OR the word "if"
+//   n starts at 0. if [n + 5] is "if" 5 is added to it and the logic chain continues
 mfs.c.cmd.if = function(argObj) {
-	if (!argObj[3]) { // need 4 arguments minimum
-		mfs.c.print('Not enough arguments!', 5);
-	} else if (argObj[1]==='in') { // regex matching
-		var rgx = new RegExp(argObj[0], (argObj.i)?"i":"" );
-		if ( rgx.exec(argObj[2]) ) mfs.c.parseBatch(argObj[3].split(';'));
-		
-	} else {
-		var a = 0,
-			v1 = argObj[0],
-			op = argObj[1],
-			v2 = argObj[2];
-		
-		// all conditionals here. if any is true adds 1 to a.
-		a += (op==='==' && v1===v2)? 1: 0;
-		a += (op==='!=' && v1!= v2)? 1: 0;
-		a += (op==='>'  && v1 > v2)? 1: 0;
-		a += (op==='>=' && v1>= v2)? 1: 0;
-		a += (op==='<'  && v1 < v2)? 1: 0;
-		a += (op==='<=' && v1<= v2)? 1: 0;
-		
-		if (a) { // at the end, if a is nonzero, at least one conditional is true
-			mfs.c.parseBatch(argObj[3].split(';'));
-		} else if (argObj[4].toLowerCase()==='else' && argObj[5]) {
-			mfs.c.parseBatch(argObj[5].split(';'));
+	const isArr = a => (Array.isArray(a));
+	const isObj = a => (typeof a === 'object' && a.constructor === Object);
+	const lc = s => s.toLowerCase();
+	const str = v => v.toString();
+	const patternmatch = /\/(.*)\/([igmu]*)|(.*)/i;
+	
+	const containFn = (a, b) => { // a contains b
+		if (isArr(a)) { // if a is array
+			return a.includes(b);
+		} else if (isObj(a)) { // if a is object
+			return a.hasOwnProperty(b);
+		} else { // a is string/number
+			let match = patternmatch.exec(b);
+			if (match.length) b = new RegExp(match[1], match[2]); // if a is regexp
+			return str(a).match(b);
 		}
-	}
+	};
+	const compareFn = {
+		'==' : (a, b) => (a === b), // equals
+		'!=' : (a, b) => (a !== b), // not equals
+		'>'  : (a, b) => (a >   b), // greater than
+		'>=' : (a, b) => (a >=  b), // greater than or equal to
+		'<'  : (a, b) => (a <   b), // less than
+		'<=' : (a, b) => (a <=  b), // less than or equal to
+		'*=' : (a, b) => containFn(a, b), // a contains b
+		'contains' : (a, b) => containFn(a, b), // same as above
+		'in' : (a, b) => containFn(b, a) // reverse of contains
+	};
+	
+	let iteration = 0;
+	let logicChainContinue = false;
+	do {
+		let offset = iteration * 6;
+		if (!argObj[offset + 3]) { // need 4 arguments minimum
+			mfs.c.print(`Not enough arguments in comparision block #${iteration + 1}!`, 5);			
+		} else {
+			let a  = argObj[offset + 0];
+			let op = argObj[offset + 1];
+			let b  = argObj[offset + 2];
+			
+			// try and parse JSON in variables a and b
+			try {
+				a = JSON.parse(a);
+				b = JSON.parse(b);
+			} catch (e) {
+				; // don't do anything... shouganai ¯\_(?)_/¯ 
+			}
+			
+			let result = (compareFn.hasOwnProperty(op))? compareFn[op](a, b) : false;
+			
+			logicChainContinue = false;
+			if (result) {
+				mfs.c.parseBatch(argObj[offset + 3].split(';'));
+			} else if (lc(argObj[offset + 4]) === 'else' && lc(argObj[offset + 5]) === 'if') {
+				// if chain continues
+				logicChainContinue = true;
+				iteration++;
+			} else if (lc(argObj[offset + 4]) === 'else' && argObj[offset + 5]) {
+				mfs.c.parseBatch(argObj[offset + 5].split(';'));
+			}
+		}
+	} while (logicChainContinue);
 }
 
-// for - loops
-// arguments:
-//  [0]: variable name. will use the vars space for varsubst
-//  [1]: start value
-//  [2]: end value
-//  [3]: command to run
-//  -step n: step value (put in quotes if negative)
-// TODO: loop through array. [1]=in, [2]=array var
-// TODO: query selections, [1]=inSelector, [2]=selector
+/* for - loops
+ * MODE 1: iterate integer in and between two numbers
+ *  [0]: variable name. will use the vars space for varsubst
+ *  [1]: start value
+ *  [2]: end value
+ *  [3]: command to run
+ *  -step n: step value (put in quotes if negative)
+ * MODE 2: iterate values of array/object
+ *  [0]: variable name. will use the vars space for varsubst
+ *  [1]: keyword "in"
+ *  [2]: object notation pointing to the array/object
+ *  [3]: command to run
+ *  -indexvar: name of variable holding the loop index
+ *  -keyvar:   name of variable holding key when looping object values
+ * TODO: query selections, [1]=inSelector, [2]=selector
+ */
 mfs.c.cmd.for = function(argObj) {
-	// store a reference to the named variable if it's defined
-	let varcopy = ( mfs.c.vars.hasOwnProperty([argObj[0]]) )? mfs.c.vars[argObj[0]]: undefined;
-	let varcopy2 = (argObj.indexvar && mfs.c.vars.hasOwnProperty([argObj.indexvar])) ? mfs.c.vars[argObj.indexvar] : undefined;
-	// steps:
-	// 1) figure out type of loop
-	// 2) build an array of values based on loop type
-	// 3) go through each item in that array, passing its value to the command
+	// back up var stack 
+	mfs.c.pushVarStack();
+	
+	/* steps:
+	 * 1) figure out type of loop
+	 * 2) build an array of values based on loop type
+	 * 3) go through each item in that array, passing its value to the command
+	 */
 	
 	// array holding the values as per step 2
+	let valueVarName; // todo: the var name in argument [0] holding the iteration value
+	let keyVarName;  // todo: index or key for the iteration value
+	let keyArray = [];
 	let valueArray = [];
 	
 	// figure out type of loop and fill the above array
-	if (!isNaN(argObj[1]) && !isNaN(argObj[2])) { // both are numbers, consider an index loop
+	if (!isNaN(argObj[1]) && !isNaN(argObj[2])) {
+		// both are numbers, consider an index loop
 		let a = parseInt(argObj[1]) || 1;
 		let b = parseInt(argObj[2]) || 10;
-		let h = parseInt(argObj.step) || (a>b)? -1: 1;
-		for (let i = a; (h>0 && i <= b) || (h<0 && i >= b); i += h) {
+		let h = parseInt(argObj.step) || (a > b)? -1: 1;
+		for (let i = a; (h > 0 && i <= b) || (h < 0 && i >= b); i += h) {
 			valueArray.push(i);
 		}
-	} else if (argObj[1] === 'in' && mfs.c.vars.hasOwnProperty(argObj[2]) && Array.isArray(mfs.c.vars[argObj[2]])) {
-		// arg 1 is "in", var of that name exists, var is an array
-		let arrayVar = mfs.c.vars[argObj[2]];
-		for (let i = 0; i < arrayVar.length; i++) {
-			valueArray.push(arrayVar[i]);
+		valueVarName = argObj[0];
+		
+	} else if (argObj[1] === 'in') {
+		// object/array iteration mode
+		// first get reference to the object (supports dot notation and access to child objects)
+		let varRef = mfs.c.util.objectNotationValue(mfs.c.fullVarObj(), argObj[2], true, true);
+		// check type
+		if (Array.isArray(varRef.obj[varRef.key])) { // is Array
+			// push its items to the value array
+			for (let item of varRef.obj[varRef.key]) {
+				valueArray.push(item);
+			}
+		} else if (typeof varRef.obj[varRef.key] === 'object' && varRef.obj[varRef.key].constructor === Object) { // is object
+			// get the object keys
+			keyArray = Object.keys();
+			// iterate those keys to get the values making sure the key and value array corresponds to each other
+			for (let key in keyArray) {
+				valueArray.push(varRef.obj[varRef.key][key]);
+			}
+		} else {
+			mfs.c.print('Couldn\'t parse array/object specified', 5);
+			return;
 		}
+		// todo: define both key and value in this argument, separated by a separator
+		// though tbh setting it with switches work just as well
+		valueVarName = argObj[0];
+		
 	} else {
 		mfs.c.print('Not enough arguments, or arguments are of the incorrect type', 5);
+		return;
 	}
 	if (!argObj[3]) { // no command given
 		mfs.c.print('No command specified.', 5);
@@ -503,24 +598,26 @@ mfs.c.cmd.for = function(argObj) {
 	
 	// now to do the loop
 	for (var i = 0; i < valueArray.length; i++ ) {
+		console.log(`For loop iteration #${i}`)
 		if (argObj.indexvar) mfs.c.vars[argObj.indexvar] = i;
-		mfs.c.vars[argObj[0]] = valueArray[i];
-		mfs.c.parse( argObj[3], true );
+		if (argObj.keyvar && keyArray.length) mfs.c.vars[argObj.keyvar] = keyArray[i];
+		mfs.c.vars[valueVarName] = valueArray[i];
+		mfs.c.parseBatch(argObj[3].split(';'));
 	}
 	
 	// restore original var of the same name
-	mfs.c.vars[argObj[0]] = varcopy;
-	if (argObj.indexvar) mfs.c.vars[argObj.indexvar] = varcopy2;
+	mfs.c.popVarStack();	
 }
 
-// Regex replace
-// arguments:
-//  -outputvar, -o: output result to this variable name
-//  [0]: input string
-//  [a], a=1,3,5,7... : regex pattern. put /between slashes/ to define custom flags
-//  [a+1]: replacement string
-//  -i: case-insensitive
-//  -g: global matching
+/* Regex replace
+ * arguments:
+ *  -outputvar, -o: output result to this variable name
+ *  [0]: input string
+ *  [a], a=1,3,5,7... : regex pattern. put /between slashes/ to define custom flags
+ *  [a+1]: replacement string
+ *  -i: case-insensitive
+ *  -g: global matching
+ */
 mfs.c.cmd.replace = function(argObj) {
 	if (!argObj[0]) {
 		mfs.c.print('Not enough arguments', 5);
@@ -541,8 +638,8 @@ mfs.c.cmd.replace = function(argObj) {
 	var i = 1;
 	while (argObj[i]) {
 		var matchPart = patternmatch.exec(argObj[i]);
-		if (matchPart===null) {
-			mfs.c.print("Error: Unable to parse argument #" +i+ " as regular expression.", 5)
+		if (matchPart === null) {
+			mfs.c.print(`Error: Unable to parse argument #${i} as regular expression.`, 5)
 			continue;
 		}
 		var replacePart = argObj[i+1] || "";
@@ -559,7 +656,7 @@ mfs.c.cmd.replace = function(argObj) {
 		i += 2;
 	}
 	
-	for (var j=0; j<rgxArray.length; j++) {
+	for (let j = 0; j < rgxArray.length; j++) {
 		s = s.replace(rgxArray[j][0], rgxArray[j][1]);
 	}
 	
@@ -567,49 +664,136 @@ mfs.c.cmd.replace = function(argObj) {
 }
 
 // DOM MANIPULATION COMMANDS
+// the common function returning supported events and its properties
+mfs.c.cmd._domEventCommon = function() {
+	
+	let sharedEventProps = ['bubbles', 'cancelable', 'ctrlKey', 'shiftKey', 'altKey', 'metaKey'];
+	return {
+		// defines which event name corresponds to which event name
+		// also define event shortcuts with base event name and default prop for that shortcut (eg rightclick)
+		eventTypes: {
+			click: {event: MouseEvent, prop: {}},
+			click_right: {event: MouseEvent, base: 'click', prop: {button: 2}},
+			click_middle: {event: MouseEvent, base: 'click', prop: {button: 1}},
+			keypress: {event: KeyboardEvent, prop: {}},
+			keypress_enter: {event: KeyboardEvent, base: 'keypress', prop: {key: 'Return'}},
+			keypress_esc: {event: KeyboardEvent, base: 'keypress', prop: {key: 'Escape'}}
+		},
+		eventProps: {
+			click: [...sharedEventProps, 'screenX', 'screenY', 'clientX', 'clientY', 'button', 'buttons'],
+			keypress: [...sharedEventProps, 'key']
+		}
+	};
+};
+
 // domEvent - dispatch event on elements
 // Arguments:
 //  [0]: selector
 //  [1]: event name
 //  -all: dispatch to all matched elements
-//  (other keyvalues will be included in the event object) 
+//   event properties shall be included as keyvalues. only supported prop names are passed to event
 mfs.c.cmd.domEvent = function(argObj) {
-	if (!argObj[1]) {
-		mfs.c.print('Not enough arguments!',5);
+	//retrieves supported event types and properties
+	const {eventTypes, eventProps} = mfs.c.cmd._domEventCommon();
+	
+	if (argObj.help) {
+		mfs.c.print(`Supported events: ${Object.keys(eventTypes).join(' ')}`, 3);
+		mfs.c.print('Supported event properties:', 3);
+		for (let n in eventProps) {
+			mfs.c.print(`  ${n}: ${eventProps[n].join(' ')}`, 3);
+		}
+	} else if (!argObj[1]) {
+		mfs.c.print('Not enough arguments!', 5);
+		return;
+	} else if (!eventTypes[argObj[1]]) {
+		mfs.c.print(`Unrecognized/unsupported event: ${argObj[1]}`, 5);
 		return;
 	}
 	
 	// select the elements
-	var el = document.querySelectorAll(argObj[0]);
+	let el = document.querySelectorAll(argObj[0]);
 	if (!el.length) return;
 	
+	// get event name (includes shortcut names)
+	let eventName = argObj[1];
+	// base event name (if shortcut). this would be a valid event name
+	let eventBase = eventTypes[eventName].base || eventName;
+	let eventRef = eventTypes[eventName].event;
+	
 	// prepares the event property object
-	var prop = {};
-	for (var n in argObj) {
-		if (!argObj.hasOwnProperty(n) || !isNaN(n) || n==='commandName' || n==='all') continue;
-		prop[n] = argObj[n];
+	let prop = Object.assign({}, eventTypes[eventName].prop);
+	for (let n in argObj) {
+		if (argObj.hasOwnProperty(n) && eventProps[eventBase].includes(n)) prop[n] = argObj[n];
 	}
 	prop.bubbles = prop.bubbles || true;
 	prop.cancellable = prop.cancellable || true;
 	
 	// construct the event
-	switch (argObj[1]) {
-	case 'click':
-		var event = new MouseEvent(argObj[1], prop);
-		break;
-	case 'keypress':
-		var event = new KeyboardEvent(argObj[1], prop);
-		break;
-	default:
-		// given event not supported
-		mfs.c.print('Unknown event type: '+argObj[1], 5);
-		return;
-	}
+	let event = new eventRef(eventBase, prop);
 
 	// dispatch the event
-	for (var i = 0; i===0 || (argObj.all && i<el.length) ; i++) {
+	let count = 0;
+	for (let i = 0; i === 0 || (argObj.all && i < el.length) ; i++) {
 		el[i].dispatchEvent(event);
+		count++;
 	}
+	mfs.c.print(`${count} event(s) dispatched.`, 3);
+}
+
+
+// domListen: Listens to events on the page and executes a command
+// Arguments:
+//  [0]: selector
+//  [1]: event name
+//  [2]: command
+//  -clear: clear the listener
+//   event properties shall be included as keyvalues. only supported prop names are passed to event
+mfs.c.cmd.domListen = function(argObj) {
+	//WIP
+	//retrieves supported event types and properties
+	const {eventTypes, eventProps} = mfs.c.cmd._domEventCommon();
+	
+}
+
+mfs.c.cmd.domSpy = function(argObj) {
+	const spyEvent = e => {
+		if (!mfs.c.vars.domspy) return;
+		
+		let el = e.target;
+		let tag = el.nodeName.toLowerCase();
+		let id = (el.id) ? `#${el.id}`: '';
+		let classes = (el.classList.length) ? [null].concat(Array.from(el.classList)).join('.') : '';
+		let attr = el.attributes;
+		let attrOutLines = [];
+		for (let i = 0; i < attr.length; i++) {
+			attrOutLines.push(`\t${attr[i].name} = ${attr[i].value}`);
+		}
+		
+		mfs.c.print(`${tag}${classes}${id}\n\n${attrOutLines.join('\n')}`, 0, {clearLastLine: true});
+	};
+	
+	mfs.c.vars.domspy = !!argObj[0];
+	if (!argObj[0]) {
+		document.body.removeEventListener('mouseenter', spyEvent, true);
+		mfs.c.print('Domspy disabled.', 0);
+	} else {
+		document.body.addEventListener('mouseenter', spyEvent, true);
+		mfs.c.print('Domspy enabled. Hover over items.', 0);
+	}
+}
+
+// i don't even know
+mfs.c.cmd.wait = async function(argObj) {
+	if (!argObj[1]) {
+		mfs.c.print( 'Not enough parameters', 3);
+		return;
+	}
+	console.log('wait start');
+	
+	let duration = argObj[0] || 0;
+	await mfs.c.util.delayedResolve(duration, true);
+	console.log('wait continue', argObj[1]);
+	mfs.c.parseBatch(argObj[1].split(';'));
 }
 
 // command table (name as typed : fn)
@@ -631,5 +815,79 @@ mfs.c.cmdTable = {
 	"if"		: mfs.c.cmd.if,
 	"for"		: mfs.c.cmd.for,
 	"replace"	: mfs.c.cmd.replace,
-	"dom_event"	: mfs.c.cmd.domEvent
+	"dom_event"	: mfs.c.cmd.domEvent,
+	"domspy"	: mfs.c.cmd.domSpy,
+	"wait"		: mfs.c.cmd.wait
 };
+
+// new command table
+mfs.c.commands = mfs.c.commands || [];
+mfs.c.commands = mfs.c.commands.concat([{
+	names: ['imglist', 'listimg'],
+	description: 'List images on current or given page URL',
+	fn: mfs.c.cmd.listimg
+}, {
+	names: ['linklist', 'listlink'],
+	description: 'List links on current page',
+	fn: mfs.c.cmd.listlink
+}, {
+	name: 'time',
+	description: 'Displays time',
+	fn: mfs.c.cmd.time
+}, {
+	name: 'play',
+	description: 'Plays HTML5 audio/video',
+	fn: mfs.c.cmd.av
+}, {
+	name: 'genlinks',
+	description: 'Generate links with regular numeric pattern',
+	fn: mfs.c.cmd.genlinks
+}, {
+	name: 'dlimg',
+	description: 'Download images from current page or from a range of numbers',
+	fn: mfs.c.cmd.dlimg
+}, {
+	name: 'type',
+	description: 'Print contents of a specified text file URL',
+	fn: mfs.c.cmd.type
+}, {
+	name: 'exec',
+	description: 'Executes a MFScript Console compatible batch file from URL',
+	fn: mfs.c.cmd.exec
+}, {
+	names: ['alias', 'unalias'],
+	description: '[un]Sets command aliases',
+	fn: mfs.c.cmd.alias
+}, {
+	names: ['var', 'set'],
+	description: 'Sets/unsets variables',
+	fn: mfs.c.cmd.vars
+}, {
+	name: 'if',
+	description: 'Conditionally execute command blocks',
+	fn: mfs.c.cmd.if
+}, {
+	name: 'for',
+	description: 'Execute a command block for a specified number of times, or for each item in an array/object',
+	fn: mfs.c.cmd.for
+}, {
+	name: 'replace',
+	description: 'Replace matching patterns on a string with new values',
+	fn: mfs.c.cmd.replace
+}, {
+	name: 'dom_event',
+	description: 'Dispatch DOM events on elements on the page',
+	fn: mfs.c.cmd.domEvent
+}, {
+	name: 'dom_listen',
+	description: 'Execute a command block when specified page elements raises specified DOM events',
+	fn: mfs.c.cmd.domListen
+}, {
+	name: 'domspy',
+	description: 'View the properties of the element under the mouse cursor',
+	fn: mfs.c.cmd.domSpy
+}, {
+	name: 'wait',
+	description: 'Waits the specified miliseconds before executing a command block (doesn\'t pause script)',
+	fn: mfs.c.cmd.wait
+}]);
