@@ -568,7 +568,7 @@ mfs.c.print = function(str, type, options = {}) {
 // custom cmds in a object array
 // format: [{name:string, fn: function(){}},...]
 mfs.c.parseAddCmds = function() {
-	if (!mfs.c.customCommands.length) return;
+	if (!mfs.c.customCommands || !mfs.c.customCommands.length) return;
 	var list = mfs.c.customCommands,		
 		tbl = mfs.c.addCmdTable;
 	for (let i = 0; i < list.length; i++) {
