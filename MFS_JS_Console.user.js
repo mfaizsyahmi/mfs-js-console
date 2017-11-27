@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name        MFScript Console
 // @namespace   mfsfareast
 // @description Something silly
@@ -549,7 +549,7 @@ mfs.c.print = function(str, type, options = {}) {
 	// scroll to element (FF only!)
 	oel.scrollIntoView();
 	
-	if ( mfs.c.util.isGlobalPoster() && !options.fromGlobal ) {
+	if ( mfs.c.util.isGlobalPoster && mfs.c.util.isGlobalPoster() && !options.fromGlobal ) {
 		console.log('adding item to printcache here...')
 		var now = new Date(),
 			jsonow = now.toJSON(),
@@ -628,7 +628,7 @@ mfs.c.globalFocus = function () {
 
 mfs.c.globalInterval = function () {
 	var now = new Date();
-	if (mfs.c.util.isGlobalPoster()) { // is poster?
+	if (mfs.c.util.isGlobalPoster && mfs.c.util.isGlobalPoster()) { // is poster?
 		var activecache = mfs.c.state.printcache || [];
 		
 		// poster is in charge of clearing the print cache
@@ -674,6 +674,9 @@ mfs.c.globalSetup = function (val = false) {
 // MAIN INITIALIZATION ROUTINE
 mfs.c.init = function () {
 	const c = mfs.c;
+	// check that cmd and util modules are loaded
+	console.log(`mfs console modules status:\n  cmd:${!!mfs.c.cmd}\n  util:${!!mfs.c.util}`);
+	
 	// Stage 1: container and iframe first
 	c.container = document.createElement('div');
 	c.container.id = "mfs-c-container";
