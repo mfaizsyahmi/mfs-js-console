@@ -1,3 +1,21 @@
-rem This is a test autoexec file.
+// This is the default autoexec file for MFS Console.
+// Double slashes marks a comment.
+// The commands here are executed on the console's initialization.
+// By default that happens when you first press the tilde key on pages. 
+// If initOnPageLoad is set to true the console will load after the page loads,
+// and this file is then run.
+//
+// You can find this file in Greasemonkey's installation directory 
+// for this script.
+// 
+// If you have imported a custom autoexec file using "autoexec import" the 
+// one found on the installation directory would be ignored.
+// [NOT YET IMPLEMENTED]
+// 
+// Uncomment the following lines to display a custom start text
+// cls
+// echo ${scriptTitle} v${scriptVer}
+// echo ${fulldate}
 
-echo $fulldate
+// To execute commands on different pages use the if command
+// if ${location} contains youtube.com "echomd [Home](/) [Subscriptions](/feed/subscriptions) [Dashboard](/dashboard)"
