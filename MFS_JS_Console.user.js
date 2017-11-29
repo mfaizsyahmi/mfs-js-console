@@ -1,9 +1,9 @@
-// ==UserScript==
+﻿// ==UserScript==
 // @name        MFScript Console
 // @namespace   mfsfareast
 // @description Something silly
 // @include     *
-// @version     0.6.0
+// @version     0.6.1
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -19,6 +19,7 @@
 // @resource    containerStyle  https://github.com/mfaizsyahmi/mfs-js-console/raw/master/container.css
 // @resource    iframeStyle     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/iframe.css
 // @resource    autoexec        https://github.com/mfaizsyahmi/mfs-js-console/raw/master/autoexec.txt
+// @noframes
 // ==/UserScript==
 
 // TO DO:
@@ -53,7 +54,7 @@ mfs.c.state = { /*mfs.c.state ||*/
 	init		: false, // initialized?
 	visible		: false,
 	title		: GM_info.script.name || 'MFScript Console',
-	ver			: GM_info.script.version || 'v0.6.0',
+	ver			: GM_info.script.version || 'v0.6.1',
 	infoURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/',
 	helpURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/wiki/Commands',
 	togglekey	: '`',
@@ -75,7 +76,7 @@ mfs.c.state = { /*mfs.c.state ||*/
 	imgDlQueue: [],
 	imgDlTimeoutID: 0,
 	parseQueue: [],
-	parseTimeoutID: 0,
+	parsingQueue: false,
 	//global: false, // should be public
 	//globalPosterRef: null;
 	printcache: [],
@@ -112,7 +113,7 @@ mfs.c.aliases = JSON.parse(GM_getValue('aliases', '{}'));
 //  enabled : false to disable
 //  urlMatch: regexp string to match url (JSON.stringify-friendly)
 //  content: the commands, separated by newlines
-mfs.c.autoexec = JSON.parse(GM_getValue('autoexec', '{}'));
+// mfs.c.autoexec = JSON.parse(GM_getValue('autoexec', '{}'));
 
 // just a list of commands directly interpreted by parser
 mfs.c.cmdlist = ['echo', 'echomd', 'clear', 'cls', 'clc', 'help', 'reload', 'resetvar', 'savevar', 'rem'];
@@ -201,13 +202,14 @@ mfs.c.commands = mfs.c.commands.concat([{
 }, {
 	name: 'help',
 	description: 'Display help',
-	fn: () => {
+	fn: (argObj) => {
 		let lines = [];
 		for (let cmd of mfs.c.commands) {
 			for (let cmdName of cmd.names || [cmd.name]) {
 				let nameCol = cmdName + ((cmd.custom)? '*' : '');
-				let space = ' '.repeat(Math.max(1, 12 - nameCol.length));
-				lines.push(`${nameCol}${space}${cmd.description||''}`);
+				let space = (argObj.short) ? '' : ' '.repeat(Math.max(1, 12 - nameCol.length));
+				let desc = (argObj.short) ? '' : cmd.description || '';
+				lines.push(`${nameCol}${space}${desc}`);
 			}
 		}
 		lines.sort();
@@ -267,9 +269,7 @@ mfs.c.parse = function(s, batch) {
 	// start executing commands
 	if (cmdMatches.length) {
 		cmdMatches[0].fn(argsObj);
-		
-	} else if (!done && mfs.c.aliases && mfs.c.aliases.hasOwnProperty(cmdName)) { // parse alias
-		// console.log('found alias: ' + cmdName);
+	} else if (mfs.c.aliases && mfs.c.aliases.hasOwnProperty(cmdName)) { // parse alias
 		// prepare array of commands
 		let cmdlist = mfs.c.aliases[cmdName].split(';');
 		
@@ -279,6 +279,7 @@ mfs.c.parse = function(s, batch) {
 		}
 		
 		// pass array to parseBatch for further, *proper* processing
+		console.log('batch parse from alias', cmdName);
 		mfs.c.parseBatch(cmdlist, true);
 		
 	} else { 
@@ -286,10 +287,16 @@ mfs.c.parse = function(s, batch) {
 	}
 	
 	// chaining
-	if (batch && mfs.c.fullVarObj().cmd_chain && mfs.c.state.parseQueue.length) {
-		mfs.c.state.parseQueue.shift();
-		mfs.c.processParseQueue();
-	}
+	//if (batch && mfs.c.vars.cmd_chain && mfs.c.state.parseQueue.length) {
+		// this function should no longer be required to call processParseQueue
+		// instead processParseQueue loops the queue by itself
+		
+		/* 
+		 * mfs.c.state.parseQueue.shift();
+		 * console.log(mfs.c.state.parseQueue.length);
+		 * mfs.c.processParseQueue();
+		 */
+	//}
 };
 
 // batch parsing
@@ -301,11 +308,14 @@ mfs.c.parseBatch = function(cmdArray, alias) {
 	
 	if (mfs.c.vars.cmd_chain && alias) { // special alias processing
 		mfs.c.state.parseQueue.shift();
-		mfs.c.state.parseQueue = [].concat(cmdArray, mfs.c.state.parseQueue);
-		mfs.c.processParseQueue();
+		mfs.c.state.parseQueue = cmdArray.concat(mfs.c.state.parseQueue);
+		// only initiate parseQueue when it's not alraedy running
+		if (!mfs.c.state.parsingQueue) mfs.c.processParseQueue();
+		
 	} else if (mfs.c.vars.cmd_chain) { // chained
-		mfs.c.state.parseQueue = [].concat(mfs.c.state.parseQueue, cmdArray);
-		mfs.c.processParseQueue();
+		mfs.c.state.parseQueue = mfs.c.state.parseQueue.concat(cmdArray);
+		// only initiate parseQueue when it's not alraedy running
+		if (!mfs.c.state.parsingQueue) mfs.c.processParseQueue();
 		
 	} else { // non-chaining, timeout all at once
 		for(var i = 0; i < cmdArray.length; i++) {
@@ -315,25 +325,32 @@ mfs.c.parseBatch = function(cmdArray, alias) {
 }
 
 mfs.c.processParseQueue = function () {
+	// function called while already parsing queue -> abort the new call
+	if (mfs.c.state.parsingQueue) return;
+	
 	if (!mfs.c.state.parseQueue.length) {
-		mfs.c.state.parseTimeoutID = 0;
 		return;
 	} else if (mfs.c.state.parseQueue.length > 1000) {
 		console.log('WARNING: too many queued commands!!');
+		// clear the queue;
+		mfs.c.state.parseQueue = [];
 		return;
 	}
 	
-	/*
-	mfs.c.state.parseTimeoutID = setTimeout( (s) => {
-		console.log(`parsing queued command: ${s}`)
-		mfs.c.parse(s, true);
-		//mfs.c.state.parseQueue.shift();
-	}, 0, mfs.c.state.parseQueue[0]);
-	*/
+	debugger;
 	// trying out synchronous parsing of the queue, to get "for" to work correctly
+	mfs.c.state.parsingQueue = true;
 	while (mfs.c.state.parseQueue.length) {
-		mfs.c.parse(mfs.c.state.parseQueue.shift(), true);
+		// note: parse can push alias commands into queue
+		try {
+			mfs.c.parse(mfs.c.state.parseQueue[0], true);
+		} catch(e) {
+			// we don't want errors in parsing the queue from keeping the parsingQueue flag on
+			console.log('error parsing queued command: ', mfs.c.state.parseQueue[0]);
+		}
+		mfs.c.state.parseQueue.shift();
 	}
+	mfs.c.state.parsingQueue = false;
 }
 
 // moved out from "exec" command

@@ -392,7 +392,6 @@ mfs.c.cmd.vars = function(argsObj) {
 		//   key: name of the last key
 		let target = mfs.c.util.objectNotationValue(mfs.c.fullVarObj(), key, true, true);
 		console.log(target);
-		//return // debug
 		
 		let value;
 		if (argsObj[1] === '$' && argsObj[3]) { // args satisfy query syntax
@@ -411,7 +410,7 @@ mfs.c.cmd.vars = function(argsObj) {
 				break;
 			}
 		} else if (argsObj.prompt) { // prompt value
-			value = prompt(`Enter value for variable "${key}"`);
+			value = prompt(argsObj.prompt || `Enter value for variable "${key}"`);
 		} else { // ordinary value 
 			value = argsObj[1];
 		}
@@ -429,7 +428,7 @@ mfs.c.cmd.vars = function(argsObj) {
 			target.obj[target.key].push(value);
 		} else if (argsObj.append && typeof target.obj[target.key] === 'string') { // append mode on string
 			target.obj[target.key] += value;
-		} else if (argsObj.append && typeof isObj(target.obj[target.key]) && isObj(value)) { // append on object
+		} else if (argsObj.append && isObj(target.obj[target.key]) && isObj(value)) { // append on object
 			Object.assign(target.obj[target.key], value);
 		} else if (argsObj.add && !isNaN(target.obj[target.key]) ) { // add on number
 			target.obj[target.key] += value;
@@ -453,13 +452,13 @@ mfs.c.cmd.vars = function(argsObj) {
 //  [n + 3]: command if true
 //  [n + 4]: the word "else"
 //  [n + 5]: command if false OR the word "if"
-//   n starts at 0. if [n + 5] is "if" 5 is added to it and the logic chain continues
+//   n starts at 0. if [n + 5] is "if" 6 is added to it and the logic chain continues
 mfs.c.cmd.if = function(argObj) {
 	const isArr = a => (Array.isArray(a));
 	const isObj = a => (typeof a === 'object' && a.constructor === Object);
-	const lc = s => s.toLowerCase();
+	const lc = s => (typeof s === 'string')? s.toLowerCase(): s;
 	const str = v => v.toString();
-	const patternmatch = /\/(.*)\/([igmu]*)|(.*)/i;
+	const patternmatch = /\/([^/]*?)\/([igmu]*)/i;
 	
 	const containFn = (a, b) => { // a contains b
 		if (isArr(a)) { // if a is array
@@ -468,8 +467,12 @@ mfs.c.cmd.if = function(argObj) {
 			return a.hasOwnProperty(b);
 		} else { // a is string/number
 			let match = patternmatch.exec(b);
-			if (match.length) b = new RegExp(match[1], match[2]); // if a is regexp
-			return str(a).match(b);
+			if (match) {
+				b = new RegExp(match[1], match[2]); // if a is regexp
+				return (str(a).search(b) >= 0);
+			} else {
+				return str(a).includes(b);
+			}
 		}
 	};
 	const compareFn = {
@@ -489,7 +492,7 @@ mfs.c.cmd.if = function(argObj) {
 	do {
 		let offset = iteration * 6;
 		if (!argObj[offset + 3]) { // need 4 arguments minimum
-			mfs.c.print(`Not enough arguments in comparision block #${iteration + 1}!`, 5);			
+			mfs.c.print(`Not enough arguments in comparison block #${iteration + 1}!`, 5);			
 		} else {
 			let a  = argObj[offset + 0];
 			let op = argObj[offset + 1];
@@ -766,18 +769,18 @@ mfs.c.cmd.domSpy = function(argObj) {
 		let attr = el.attributes;
 		let attrOutLines = [];
 		for (let i = 0; i < attr.length; i++) {
-			attrOutLines.push(`\t${attr[i].name} = ${attr[i].value}`);
+			attrOutLines.push(`  ${attr[i].name} = ${attr[i].value}`);
 		}
 		
-		mfs.c.print(`${tag}${classes}${id}\n\n${attrOutLines.join('\n')}`, 0, {clearLastLine: true});
+		mfs.c.print(`${tag}${classes}${id}\n${attrOutLines.join('\n')}`, 2, {clearLastLine: true});
 	};
 	
 	mfs.c.vars.domspy = !!argObj[0];
 	if (!argObj[0]) {
-		document.body.removeEventListener('mouseenter', spyEvent, true);
+		document.body.removeEventListener('mouseover', spyEvent, true);
 		mfs.c.print('Domspy disabled.', 0);
 	} else {
-		document.body.addEventListener('mouseenter', spyEvent, true);
+		document.body.addEventListener('mouseover', spyEvent, true);
 		mfs.c.print('Domspy enabled. Hover over items.', 0);
 	}
 }
