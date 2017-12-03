@@ -1,5 +1,5 @@
 // BUILT-IN COMMANDS
-mfs = this.mfs || {};
+this.mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 mfs.c.cmd = mfs.c.cmd||{};
 
@@ -99,7 +99,7 @@ mfs.c.cmd.dlimg = function(args) {
 		var s = args[0],
 		numrange = [],
 		rgx = /*mfs.c.state.regex.filename4 ||*/ /([^/\\&\?]+)(\.\w{3,4})(?=([\?&].*$|$))/,
-		s = (mfs.c.fullVarObj()["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
+		s = (mfs.c.vars["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
 		//console.log(sp);
 		
 		if (typeof args[3]!== 'undefined') { // more than three arguments, assume list of items
@@ -260,7 +260,7 @@ mfs.c.cmd.genlinks = function(argObj) {
 	var s = argObj[0],
 		numrange = [],
 		rgx = /*mfs.c.state.regex.filename4 ||*/ /([^/\\&\?]+)(\.\w{3,4})(?=([\?&].*$|$))/,
-		sp = (mfs.c.fullVarObj()["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
+		sp = (mfs.c.vars["genlinks-anyname"])? s.replace(rgx, "$$1$2") : s;
 		//console.log(sp);
 		
 	if(typeof argObj[3]!== 'undefined') { // more than three arguments, assume list of items
@@ -360,26 +360,30 @@ mfs.c.cmd.vars = function(argsObj) {
 	const isObj = obj => (typeof obj === 'object' && obj.constructor === Object);
 	
 	if (!argsObj[0]) {  // print vars
-		var varlist = [];
-		for(let key in mfs.c.fullVarObj()) {
-			let val = (mfs.c.fullVarObj().hasOwnProperty(key)) ? mfs.c.fullVarObj()[key] : null;
+		let varlist = [];
+		let staticVars = mfs.c.vars;
+		let fullVars = mfs.c.fullVarObj();
+		for(let key in fullVars) {
+			let dynMark = !staticVars.hasOwnProperty(key) ? '*' : '';
+			let val = (fullVars.hasOwnProperty(key)) ? fullVars[key] : null;
 			if (isArr(val)) { // value is array
 				/*
 				for (let i = 0; i < val.length; i++) { // loop through array
 					varlist.push(`${key}[${i}] = ${val[i]}`);
 				}*/
-				varlist.push(`${key} = Array ${JSON.stringify(val)}`);
+				varlist.push(`${dynMark}${key} = Array ${JSON.stringify(val)}`);
 			} else if (isObj(val)) { // type is object
 				/*
 				for (let objKey in val) {
 					varlist.push(`${key}[${objKey}] = ${val[objKey]}`);
 				}*/
-				varlist.push(`${key} = Object ${JSON.stringify(val)}`);
+				varlist.push(`${dynMark}${key} = Object ${JSON.stringify(val)}`);
 			} else {
-				varlist.push(`${key} = ${val}`);
+				varlist.push(`${dynMark}${key} = ${val}`);
 			}
 		}
 		varlist.sort();
+		varlist.push('*Dynamic variable');
 		mfs.c.print(varlist.join('\n'));
 	} else { // set var
 		let key = argsObj[0];
@@ -785,6 +789,38 @@ mfs.c.cmd.domSpy = function(argObj) {
 	}
 }
 
+// an analogue to GM_addStyle (but without using GM's extension)
+// todo: more powerful command that can add & disable stylesheets by name/url
+mfs.c.cmd.addStyle = function(argObj) {
+	const addStyleCb = (css) => {
+		let styleEl = document.createElement('style');
+		let cssText = document.createTextNode(css);
+		styleEl.appendChild(cssText);
+		document.head.appendChild(styleEl);
+	}
+	
+	if (argObj.url) {
+		mfs.c.util.ajax(argObj.url, (r) => {
+			if (r.status === 200) {
+				addStyleCb(r.responseText);
+			} else {
+				mfs.c.print(`Error loading ${argObj.url} : ${r.status} - ${r.statusText}`, 5);
+			}
+		});
+	} else {
+		addStyleCb(argObj[0]);
+	}
+}
+
+// another anologue/interface to GM function
+mfs.c.cmd.setClipboard = function(argObj) {
+	try {
+		GM_setClipboard(argObj._argStr);
+	} catch(e) {
+		console.log(`error setting clipboard - ${e}`);
+	}
+}
+
 // i don't even know
 mfs.c.cmd.wait = async function(argObj) {
 	if (!argObj[1]) {
@@ -820,7 +856,8 @@ mfs.c.cmdTable = {
 	"replace"	: mfs.c.cmd.replace,
 	"dom_event"	: mfs.c.cmd.domEvent,
 	"domspy"	: mfs.c.cmd.domSpy,
-	"wait"		: mfs.c.cmd.wait
+	"wait"		: mfs.c.cmd.wait,
+	"addstyle"	: mfs.c.cmd.addStyle
 };
 
 // new command table
@@ -871,7 +908,7 @@ mfs.c.commands = mfs.c.commands.concat([{
 	fn: mfs.c.cmd.if
 }, {
 	name: 'for',
-	description: 'Execute a command block for a specified number of times, or for each item in an array/object',
+	description: 'Iterate a range of numbers or items in an array and object and execute a command block',
 	fn: mfs.c.cmd.for
 }, {
 	name: 'replace',
@@ -893,4 +930,12 @@ mfs.c.commands = mfs.c.commands.concat([{
 	name: 'wait',
 	description: 'Waits the specified miliseconds before executing a command block (doesn\'t pause script)',
 	fn: mfs.c.cmd.wait
+}, {
+	name: 'addstyle',
+	description: 'Adds a string of CSS to the document',
+	fn: mfs.c.cmd.addStyle
+}, {
+	name: 'setclipboard',
+	description: 'Sets the contents of the clipboard',
+	fn: mfs.c.cmd.setClipboard
 }]);

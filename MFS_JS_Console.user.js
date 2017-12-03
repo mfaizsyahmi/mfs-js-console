@@ -1,9 +1,9 @@
 ﻿// ==UserScript==
 // @name        MFScript Console
 // @namespace   mfsfareast
-// @description Something silly
+// @description Adds a little CLI on pages, interpreting my home-brewn MFScript
 // @include     *
-// @version     0.6.1
+// @version     0.6.2
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -11,6 +11,7 @@
 // @grant       GM_getResourceText
 // @grant       GM_info
 // @grant       GM_openInTab
+// @grant		GM_setClipboard
 // @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/util.js
 // @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/cmds.js
 // @require     https://github.com/mfaizsyahmi/mfs-js-console/raw/master/addCmds.js
@@ -46,7 +47,7 @@ function GM_getResourceText() {}
 //GM_deleteValue('aliases');
 
 //namespaces
-mfs = this.mfs || {};
+this.mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 
 // private states
@@ -391,7 +392,7 @@ mfs.c.argObj = function (args) {
 	// [3]: normal text including switch
 	const mStr = (match) => {
 		let val = match[3] || match[2];
-		if (mfs.c.fullVarObj()['cmd_varsubst'] == 2) val = mfs.c.varSubst(val);		
+		if (mfs.c.vars['cmd_varsubst'] == 2) val = mfs.c.varSubst(val);		
 		return val;
 	};
 	const mKey = (match) => match[3] && match[3].length > 1 && match[3].substr(0, 1) == '-' && isNaN(match[3].substr(1));
@@ -409,7 +410,7 @@ mfs.c.argObj = function (args) {
 	var key;
 	var expectValue = false; // flag next token as value to a key
 	var o = {}; // output object
-	o._argStr = (mfs.c.fullVarObj()['cmd_varsubst'] === 2) ? mfs.c.varSubst(args): args;
+	o._argStr = (mfs.c.vars['cmd_varsubst'] === 2) ? mfs.c.varSubst(args): args;
 	
 	while(match = pattern.exec(args)) {
 		if(expectValue && mKey(match) ) {
@@ -439,7 +440,6 @@ mfs.c.argObj = function (args) {
 
 // VARIABLE CONTROL SYSTEM
 // to control how exposed variables are retrieved and set
-
 mfs.c.pushVarStack = function() {
 	// make a deep copy of the top var object in the stack
 	let copy = JSON.parse(JSON.stringify(mfs.c.varStack[mfs.c.varStack.length-1]))
@@ -471,18 +471,22 @@ mfs.c.fullVarObj = function() {
 		time: now.toTimeString(),
 		ver: mfs.c.state.ver,
 		oLocation: location,
-		oDate: now
+		oDate: {
+			year: now.getFullYear(),
+			month: now.getMonth() + 1,
+			day: now.getDate(),
+			weekday: now.getDay(),
+			hours: now.getHours(),
+			minutes: now.getMinutes(),
+			seconds: now.getSeconds(),
+			tzOffset: now.getTimezoneOffset()
+		}
 	};
-	// adds dynamic vars to varObj, but then let varObj overwrite those vars
+	// let varObj overwrite the dynamic vars
 	return Object.assign({}, dynamicVars, varObj);
 }
-
-mfs.c.getVar = function(name) {
-	//probably moot now
-}
-mfs.c.setVar = function(name, value) {
-	// so is this
-}
+// an alias to the function, but in property getter form
+Object.defineProperty(mfs.c, 'fullvars', { get: mfs.c.fullVarObj });
 
 mfs.c.varSubst = function (s) {
 	// retrieves the full variable collection
@@ -525,7 +529,7 @@ mfs.c.print = function(str, type, options = {}) {
 		important: 'important',
 		debug: 'debug'
 	};
-	var blackliststr = mfs.c.fullVarObj().blacklist || "";
+	var blackliststr = mfs.c.vars.blacklist || "";
 	var blacklist = blackliststr.split("|");
 	var now = new Date();
 	
@@ -637,7 +641,7 @@ mfs.c.registerAddCommand = function(obj) {
 // GLOBAL system
 mfs.c.globalFocus = function () {
 	// on focus, set the global poster ref, and get the stored printcache
-	if ( mfs.c.fullVarObj().global && document.visibilityState === 'visible') {
+	if ( mfs.c.vars.global && document.visibilityState === 'visible') {
 		GM_setValue('globalPosterRef', location.href);
 		mfs.c.state.printcache = JSON.parse(GM_getValue('printcache','[]'));
 	}
@@ -674,14 +678,16 @@ mfs.c.globalInterval = function () {
 }
 
 mfs.c.globalSetup = function (val = false) {
+	const onVisChangeFn = () => { mfs.c.globalFocus() };
+	
 	if (val) {
 		// listen for focus
-		document.addEventListener('visibilitychange', (e) => { mfs.c.globalFocus() } );
-		mfs.c.globalIntervalID = setInterval( () => { mfs.c.globalInterval() }, Number(mfs.c.fullVarObj().globalInterval)||1000 );
+		document.addEventListener('visibilitychange', onVisChangeFn );
+		mfs.c.globalIntervalID = setInterval( () => { mfs.c.globalInterval() }, Number(mfs.c.vars.globalInterval)||1000 );
 		mfs.c.globalFocus(); // assume page that runs this is in focus
 		mfs.c.print('Global mode enabled', 3);
 	} else {
-		document.removeEventListener('visibilitychange', (e) => { mfs.c.globalFocus() } );
+		document.removeEventListener('visibilitychange', onVisChangeFn );
 		clearInterval(mfs.c.globalIntervalID);
 		mfs.c.print('Global mode disabled', 3);
 	}

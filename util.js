@@ -1,5 +1,5 @@
 //namespaces
-mfs = this.mfs || {};
+this.mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 
 // UTILITY FUNCTIONS
@@ -29,7 +29,6 @@ mfs.c.util.txtfmt2 = function(s, obj) { // formats text, but with named argument
 	}*/
 	const replacer = (p1) => {
 		let val = mfs.c.util.objectNotationValue(obj, p1, true);
-		console.log(val, typeof val === 'function');
 		if (Array.isArray(val) || (typeof val === 'object' && val.constructor === Object)) {
 			val = JSON.stringify(val);
 		} else if (typeof val === 'function') {
@@ -78,6 +77,17 @@ mfs.c.util.markdown = function(s) {
 			.replace(/\*\b([^\*]*)\b\*/g, '<b>$1</b>'); // bold
 }
 
+mfs.c.util.hashCode = function(s) {
+  var hash = 0, i, chr;
+  if (s.length === 0) return hash;
+  for (i = 0; i < s.length; i++) {
+    chr  = s.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash;
+};
+
 // a standardized way to have commands support -outputvar
 // argObj: argObj as passed to command
 //   this fn checks the outputvar or o keyvalue of the object
@@ -115,7 +125,7 @@ mfs.c.util.ajax = function (url, callback, argObj = {}) {
 	largObj.url = url;
 	if (typeof GM_xmlhttpRequest !== 'undefined') { // GM's method, can break through CORS
 		largObj.onload = function (r) {
-			if (r.readyState===4) {
+			if (r.readyState === 4) {
 				callback(r);
 			}
 		};
