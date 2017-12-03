@@ -1,5 +1,5 @@
 // BUILT-IN COMMANDS
-this.mfs = this.mfs || {};
+var mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 mfs.c.cmd = mfs.c.cmd||{};
 

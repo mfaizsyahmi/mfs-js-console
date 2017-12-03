@@ -47,7 +47,7 @@ function GM_getResourceText() {}
 //GM_deleteValue('aliases');
 
 //namespaces
-this.mfs = this.mfs || {};
+var mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 
 // private states

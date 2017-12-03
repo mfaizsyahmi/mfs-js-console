@@ -1,5 +1,5 @@
 //namespaces
-this.mfs = this.mfs || {};
+var mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 
 // UTILITY FUNCTIONS

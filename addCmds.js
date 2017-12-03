@@ -1,9 +1,9 @@
-/* addCmds.js
+﻿/* addCmds.js
  * This is a file allowing you to edit and add custom commands to MFSJSC.
  * Adding custom commands is achieved by passing structured objects to a mfs.c.customCommands array.
  * The object should have the following properties:
- *  name: Name as typed. Should be unique. 
- *        If a native command, or another custom command exists with the same name the command will fail to register.
+ *  name: (required) Name as typed. Should be unique.
+ *  namespace: (required) Unique namespace. If name conflicts with existing commands namespace should be included.
  *  fn:   The command function itself, accepting a single argObj object
  * 
  * Be sure to regularly make backups of this file, just in case an update overwrites this file.
@@ -61,3 +61,92 @@ mfs.c.customCommands.push({
 		})
 	}
 })
+
+mfs.c.customCommands.push({
+	name: "nhdl",
+	namespace: 'mfs',
+	description: 'Prepares string to pass to the nhdl ahk script',
+	fn: (argObj) => {
+		if (!location.hostname.match('nhentai.net')) return;
+		
+		let imageUrl = document.body.querySelector('#cover img').dataset.src;
+		let count = document.body.querySelectorAll('.thumb-container').length;
+		let title = document.body.querySelector('h1').textContent;
+		title = title.replace(/^\([^)]*\)\s?/, '') // remove (convention info) at the start
+		infoPattern = /\s*(\[[^\]]*\]|{[^}]*}|(==).*\2)$/; // matches [tags] {tags} ==tags== at the end (but not series tag)
+		while ( title.match(infoPattern) ) {
+			title = title.replace(infoPattern, '');
+		}
+		
+		// try to figure out categDir
+		let categDir;
+		// if specified, use it 
+		if (argObj[0]) {
+			categDir = argObj[0];
+		} else {
+			// if not, look firstly at the series
+			const seriesPatterns = {
+				'!AMAGAMI'  : /^amagami/i,
+				'!ANGEL'    : /^angel beats!/i,
+				'!CHUUNI'   : /^chuunibyou/i,
+				'!GJ-BU'    : /^GJ-Bu/i,
+				'!HARUHI'   : /haruhi suzumiya/i,
+				'!HOLO'     : /^Spice and Wolf/i,
+				'!HYOUKA'   : /^Hyouka/i,
+				'!KONOSUBA'  : /^kono subarashii/i,
+				'!KYOUKAI'  : /^Kyoukai no Kanata/i,
+				'!LUCKY'    : /^Lucky Star/i,
+				'!Monogatari' : /^(bake|nise|kuro)monogatari/i,
+				'!NGE'      : /^Neon Genesis/i,
+				'!Nisekoi'  : /^Nisekoi/i,
+				'!OREGAIRU' : /^Yahari Ore no/i,
+				'!OREIMO'   : /^Ore no Imouto ga Konna/i,
+				'!RE:ZERO'  : /^Re Zero kara/i,
+				'!SAO'      : /Sword Art Online/i,
+				'!TOARU'    : /^Toaru (Majutsu|Kagaku)/i,
+				'!TORADORA' : /^Toradora/i
+			};
+			
+			let seriesCollection = document.body.querySelector('#tags .tag-container:first-child .tag');
+			let seriesList = [];
+			seriesCollection.forEach( item => { seriesList.push( item.childNodes[0].textContent.trim() ) } );
+			let seriesMatches = {};
+			
+			for (let k in seriesPatterns) {
+				for (let seriesName of seriesList) {
+					if (seriesName.match(seriesPatterns[k])) {
+						seriesMatches[k] = seriesMatches[k] + 1 || 1;
+					}
+				}
+			}
+			let bestMatch = Object.keys(seriesMatches).reduce( (a, b) => seriesMatches[a] > seriesMatches[b] ? a : b );
+		}
+		
+		// then, failing that, look for tag that can suggest the correct category
+		if (!categDir) {
+			let wantedTags = {
+				lolicon: 0,
+				shotacon: 0,
+				yaoi: 0
+			};		
+			let tagCollection = document.body.querySelectorAll('.tags .tag');		
+			tagcollection.forEach( item => { 
+				let text = item.childNodes[0].textContent.trim();
+				if (wantedTags.hasOwnProperty(text)) wantedTags[text] = true;
+			});
+			if (wantedTags.yaoi) {
+				categDir = 'SY';
+			} else if (wantedTags.lolicon && wantedTags.shotacon) {
+				categDir = 'LS';
+			} else if (wantedTags.lolicon) {
+				categDir = 'LOL';
+			} else if (wantedTags.shotacon) {
+				categDir = 'SY';
+			} else {
+				categDir = 'H';
+			}
+		}
+		
+		GM_setClipboard(`#NHDL§${imageUrl}§${count}§${categDir}§${title}`);
+	}
+});
