@@ -3,8 +3,33 @@ var mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 mfs.c.cmd = mfs.c.cmd||{};
 
-// null command, does nothing
-mfs.c.cmd.null = function() {}; // sinkhole
+// manage autoexec
+mfs.c.cmd.autoexec = function(argObj) {
+	const srcValues = ['resource', 'value'];
+	
+	if (!argObj[0]) {
+		mfs.c.print(`autoexec source: ${mfs.c.vars.autoexec_src}\nsubcommands: edit reset source`, 'info');
+	} else if (argObj[0] === 'edit') {
+		// todo: call an editor function, which opens up an editor
+		mfs.c.showEditor({
+			title: 'Autoexec',
+			getter: () => GM_getValue('autoexec') || GM_getResourceText('autoexec'),
+			setter: (str) => GM_setValue('autoexec', str)
+		});
+	} else if (argObj[0] === 'reset' && argObj.confirm) {
+		GM_deleteValue('autoexec');
+	} else if (argObj[0] === 'reset') {
+		mfs.c.print('Confirm autoexec reset? [yes](cmd:autoexec reset -confirm;cls -lastline) [no](cmd:cls -lastline)',
+		'important', {parseMarkdown: true});
+	} else if (argObj[0] === 'src' || argObj[0] === 'source') {
+		if (srcValues.includes(argObj[1])) {
+			mfs.c.vars.autoexec_src = argObj[1];
+			mfs.c.print(`Set source to "${argObj[1]}". Execute savevar to take effect.`, 'info');
+		} else {
+			mfs.c.print('Invalid value for "source". valid values are "resource" and "value"', 'warn');
+		}
+	}
+};
 
 // TIME command
 // arguments:
@@ -179,7 +204,7 @@ mfs.c.cmd.listlink = function(argObj) {
 	var domList = docObj.querySelectorAll('a:not([href^="javascript:"])[href]');
 	var urlList = [];
 	// iterate all link elements and filter
-	domList.forEach( function(el) {
+	domList.forEach( el => {
 		let urlObj = new URL(el.href);
 		let fail = false;
 		for (let a in matchObj) {
@@ -312,7 +337,7 @@ mfs.c.cmd.exec = function(argObj) {
 		mfs.c.print('Not enough arguments',5);
 		return false;
 	}
-	mfs.c.util.ajax(argObj[0], function(r) {
+	mfs.c.util.ajax(argObj[0], r => {
 		if(r.status == 200) {
 			mfs.c.parseTimedBatch(r.responseText);
 		} else {
@@ -338,15 +363,11 @@ mfs.c.cmd.alias = function(argObj) {
 		
 	} else if (!argObj[1] || (argObj._commandName && argObj._commandName === 'unalias') ) { // remove alias
 		if (mfs.c.aliases.hasOwnProperty(argObj[0]) ) delete mfs.c.aliases[ argObj[0] ];
-		mfs.c.print('Cleared alias. "savevar" to make permanent.', 3);
+		if (!mfs.c.state.parsingQueue) mfs.c.print('Cleared alias. "savevar" to make permanent.', 3);
 		
 	} else if (argObj[1]) { // add alias
-		//if (mfs.c.cmdTable.hasOwnProperty(argObj[0]) || mfs.c.addCmdTable.hasOwnProperty(argObj[0]) ) {
-		//	mfs.c.print('Created/updated alias. "savevar" to make permanent.',3);
-		//} else {
-			mfs.c.aliases[ argObj[0] ] = argObj[1]; // always override existing aliases
-			mfs.c.print('Created/updated alias. "savevar" to make permanent.', 3);
-		//}
+		mfs.c.aliases[ argObj[0] ] = argObj[1]; // always override existing aliases
+		if (!mfs.c.state.parsingQueue) mfs.c.print('Created/updated alias. "savevar" to make permanent.', 3);
 	}
 };
 
@@ -835,31 +856,6 @@ mfs.c.cmd.wait = async function(argObj) {
 	mfs.c.parseBatch(argObj[1].split(';'));
 }
 
-// command table (name as typed : fn)
-mfs.c.cmdTable = {
-	"listimg"	: mfs.c.cmd.listimg,
-	"imglist"	: mfs.c.cmd.listimg,
-	"listlink"	: mfs.c.cmd.listlink,
-	"linklist"	: mfs.c.cmd.listlink,
-	"time"		: mfs.c.cmd.time,		// disp time
-	"play"		: mfs.c.cmd.av,			// play web media
-	"genlinks"	: mfs.c.cmd.genlinks,	// given string and 2 ranges, generate links
-	"dlimg"		: mfs.c.cmd.dlimg,		// dl images, can take same arg as genlinks
-	"type"		: mfs.c.cmd.type,		// type file
-	"exec"		: mfs.c.cmd.exec, 		// batch parser
-	"alias"		: mfs.c.cmd.alias,		// alias registrar
-	"unalias"	: mfs.c.cmd.alias,
-	"var"		: mfs.c.cmd.vars,		// variable get/set and query selector
-	"set"		: mfs.c.cmd.vars,		// synonym
-	"if"		: mfs.c.cmd.if,
-	"for"		: mfs.c.cmd.for,
-	"replace"	: mfs.c.cmd.replace,
-	"dom_event"	: mfs.c.cmd.domEvent,
-	"domspy"	: mfs.c.cmd.domSpy,
-	"wait"		: mfs.c.cmd.wait,
-	"addstyle"	: mfs.c.cmd.addStyle
-};
-
 // new command table
 mfs.c.commands = mfs.c.commands || [];
 mfs.c.commands = mfs.c.commands.concat([{
@@ -870,6 +866,10 @@ mfs.c.commands = mfs.c.commands.concat([{
 	names: ['linklist', 'listlink'],
 	description: 'List links on current page',
 	fn: mfs.c.cmd.listlink
+}, {
+	name: 'autoexec',
+	description: 'Edits or resets autoexec',
+	fn: mfs.c.cmd.autoexec
 }, {
 	name: 'time',
 	description: 'Displays time',

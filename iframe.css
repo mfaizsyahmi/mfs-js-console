@@ -8,7 +8,9 @@ body {
 }
 
 #mfs-c-input,
-#mfs-c-output {
+#mfs-c-output,
+#mfs-c-editor,
+#mfs-c-editor-header {
     color: #ddd;
     font-family: monospace;
     text-shadow: 1px 1px black;
@@ -27,9 +29,11 @@ body {
 	max-height: calc(100% - 2em);
     max-height: -moz-calc(100% - 2em);
 	overflow: hidden;
+	display: flex;
+	flex-direction: column;
 }
 #mfs-c-output .lnoutput {
-    display: block;
+    /*display: inline-block;*/
     min-height: 1em;
 	white-space: pre-wrap;
 }
@@ -71,4 +75,32 @@ body {
 #mfs-c-output .lnoutput.mfs-c-gallery {
     display: inline-block;
     margin: 1em;
+}
+
+/* editor mode */ 
+body.editor #mfs-c-input,
+body.editor #mfs-c-output {
+	display: none;
+}
+#mfs-c-editor-header {
+	display: block;
+	position: fixed;
+	top: 0;
+	width: 100%;
+	height: 1em;
+}
+#mfs-c-editor-cmd {
+	float: right;
+}
+#mfs-c-editor-cmd span {
+	cursor: pointer;
+}
+#mfs-c-editor {
+	position: fixed;
+	top: 1em;
+	width: 100%;
+	height: calc(100% - 1em);
+	overflow: hidden;
+	background: transparent;
+	border: 1px inset #ddd;
 }

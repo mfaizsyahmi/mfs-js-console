@@ -1,9 +1,9 @@
 ﻿// ==UserScript==
 // @name        MFScript Console
-// @namespace   mfsfareast
+// @namespace   mfaizsyahmi
 // @description Adds a little CLI on pages, interpreting my home-brewn MFScript
 // @include     *
-// @version     0.6.2
+// @version     0.7.0
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -24,7 +24,7 @@
 // ==/UserScript==
 
 // TO DO:
-// autoexec (needs rework)
+// autoexec /
 // dom listener system
 // dom event dispatch system /
 // dom manipulation
@@ -55,10 +55,11 @@ mfs.c.state = { /*mfs.c.state ||*/
 	init		: false, // initialized?
 	visible		: false,
 	title		: GM_info.script.name || 'MFScript Console',
-	ver			: GM_info.script.version || 'v0.6.1',
+	ver			: GM_info.script.version || 'v0.7.0',
 	infoURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/',
 	helpURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/wiki/Commands',
-	togglekey	: '`',
+	toggleKey   : {key: '`', altKey: false },
+	promptKey   : {key: '', altKey: false },
 	regex: {
 		// improved dbl quote escaping from stackoverflow.com/a/481587
 		//arg: /(?:^|\s+)("([^\\"]*|\\.*)"|'([^\\']*|\\.*)'|-*[^\s]+)/g,
@@ -78,9 +79,12 @@ mfs.c.state = { /*mfs.c.state ||*/
 	imgDlTimeoutID: 0,
 	parseQueue: [],
 	parsingQueue: false,
+	promptCmd: false, // whether current command is parsed from an input opened with prompt key (will close after a short pause)
+	promptCmdTimeout: 2000,
 	//global: false, // should be public
-	//globalPosterRef: null;
+	//globalPosterRef: null; // stored in GM
 	printcache: [],
+	varToState: ['initOnPageLoad', 'global'] // var values to copy over to state
 	//initOnPageLoad: false // should be public
 };
 
@@ -89,6 +93,7 @@ mfs.c.state = { /*mfs.c.state ||*/
 //  provided mfs.c.var references the top of stack at all times
 mfs.c.varStack = [JSON.parse(GM_getValue('vars', JSON.stringify({
 	ajaxUseWhateverOrigin: false, // used to force-enable CORS
+	autoexec_src: 'resource', // "resource" use GM_getResourceText (default), "value" use GM_getValue
 	echo: 1,
 	mru: 1,
 	imgDlType: 'image/jpeg',
@@ -109,15 +114,6 @@ mfs.c.vars = mfs.c.varStack[mfs.c.varStack.length-1];
 //  [alias name] : [alias string]
 mfs.c.aliases = JSON.parse(GM_getValue('aliases', '{}'));
 
-// container for autoexec
-// properties: 
-//  enabled : false to disable
-//  urlMatch: regexp string to match url (JSON.stringify-friendly)
-//  content: the commands, separated by newlines
-// mfs.c.autoexec = JSON.parse(GM_getValue('autoexec', '{}'));
-
-// just a list of commands directly interpreted by parser
-mfs.c.cmdlist = ['echo', 'echomd', 'clear', 'cls', 'clc', 'help', 'reload', 'resetvar', 'savevar', 'rem'];
 // container for custom commands
 mfs.c.addCmdTable = {}; // internal container, always nitialize
 //mfs.c.customCommands = mfs.c.customCommands || []; // external
@@ -140,16 +136,19 @@ mfs.c.commands = mfs.c.commands.concat([{
 	}
 }, {
 	names: ['clear', 'cls', 'clr'],
-	description: 'Clears the console',	
+	description: 'Clears the console',
 	fn: (argObj) => {
 		if (argObj.textonly) {
 			Array.prototype.forEach.call(mfs.c.output.querySelectorAll('.lnoutput'), (node) => {
 				node.parentNode.removeChild( node );
 			}); // stackoverflow.com/a/13125840
+		} else if (argObj.lastline) {
+			mfs.c.output.lastElementChild.remove();
 		} else { mfs.c.output.innerHTML = ''}
 	}
 }, {
 	name: 'debug',
+	hidden: true,
 	description: 'Prints the argument object as parsed',	
 	fn: (argObj) => {
 		console.log(argsObj);
@@ -189,10 +188,19 @@ mfs.c.commands = mfs.c.commands.concat([{
 }, {
 	name: 'resetvar',
 	description: 'Reset variables to defaults',
-	fn: () => {
-		GM_setValue('vars', undefined);
-		mfs.c.print('Vars reset. Reload to take effect.', 3); 
+	fn: (argObj) => {
+		if (argObj.confirm) {
+			GM_setValue('vars', undefined);
+			mfs.c.print('Vars reset. Reload to take effect.', 3);
+		} else {
+			mfs.c.print('Confirm reset variables? [yes](cmd:resetvar -confirm;cls -lastline) [no](cmd:cls -lastline)',
+			'important',{parseMarkdown:true});
+		}
 	}
+}, {
+	name: 'toggleconsole',
+	description: 'Toggle console',
+	fn: (argObj) => { mfs.c.toggle(argObj[0]) }
 }, {
 	name: 'global',
 	description: 'Turns global mode on/off',
@@ -206,6 +214,7 @@ mfs.c.commands = mfs.c.commands.concat([{
 	fn: (argObj) => {
 		let lines = [];
 		for (let cmd of mfs.c.commands) {
+			if (cmd.hidden) continue;
 			for (let cmdName of cmd.names || [cmd.name]) {
 				let nameCol = cmdName + ((cmd.custom)? '*' : '');
 				let space = (argObj.short) ? '' : ' '.repeat(Math.max(1, 12 - nameCol.length));
@@ -246,7 +255,7 @@ mfs.c.parse = function(s, batch) {
 	let cmdPattern = /^(?:([\S]*?(?=:)):)?([\S]*)\b/ig;
 	let cmdMatch = cmdPattern.exec(sp);
 	let cmdNamespace = cmdMatch[1];
-	let cmdName = cmdMatch[2].toLowerCase();
+	let cmdName = cmdMatch[2];//.toLowerCase();
 	// finding matching arguments early on to get argument specs for argObj
 	let cmdMatches = mfs.c.commands.filter( cmd => (cmd.names && cmd.names.includes(cmdName) ) || cmd.name===cmdName );
 	if (cmdMatches.length > 1) cmdMatches = cmdMatches.filter( cmd => cmd.namespace === cmdNamespace);
@@ -308,8 +317,11 @@ mfs.c.parseBatch = function(cmdArray, alias) {
 	if (!cmdArray || !cmdArray.length) return;
 	
 	if (mfs.c.vars.cmd_chain && alias) { // special alias processing
-		mfs.c.state.parseQueue.shift();
-		mfs.c.state.parseQueue = cmdArray.concat(mfs.c.state.parseQueue);
+		// IMPORTANT: processParseQueue will shift the first item out after the parse that lead here, 
+		// so new items must be inserted after the first item
+		let curItem = mfs.c.state.parseQueue[0];
+		let otherItems = mfs.c.state.parseQueue.slice(1);
+		mfs.c.state.parseQueue = [].concat(curItem, cmdArray, otherItems);
 		// only initiate parseQueue when it's not alraedy running
 		if (!mfs.c.state.parsingQueue) mfs.c.processParseQueue();
 		
@@ -342,6 +354,7 @@ mfs.c.processParseQueue = function () {
 	// trying out synchronous parsing of the queue, to get "for" to work correctly
 	mfs.c.state.parsingQueue = true;
 	while (mfs.c.state.parseQueue.length) {
+		console.log('Current Parse Queue: \n\n' + mfs.c.state.parseQueue.join('\n'))
 		// note: parse can push alias commands into queue
 		try {
 			mfs.c.parse(mfs.c.state.parseQueue[0], true);
@@ -499,6 +512,47 @@ mfs.c.varSubst = function (s) {
 	return s;
 }
 
+// Switches to editor mode which displays a textarea and save/close buttons
+// options is an object which contains the following:
+//  getter: fn to get the text content (required)
+//  setter: fn that gets passed the text when saving
+//  title: what you're editing
+//  close: tells the fn we want to close the editor
+mfs.c.showEditor = function(options = {}) {
+	// requires getter and setter be set, or close argument
+	if (!options.close && (!options.getter || !options.setter)) return;
+	// settings
+	let settings = Object.assign({
+		title: 'Editor',
+		close: false
+	}, options);
+	
+	const frameDoc = mfs.c.frame.contentDocument;
+	// toggle editor view
+	frameDoc.body.classList.toggle('editor', !settings.close);
+	if (settings.close) {
+		// remove all editor dom elements
+		frameDoc.querySelectorAll('#mfs-c-editor, #mfs-c-editor-header').forEach(el => el.remove());
+		return;
+	} else {
+		// create dom elements
+		let editor = frameDoc.createElement('textarea');
+		editor.id = 'mfs-c-editor';
+		editor.value = settings.getter();
+		
+		let header = frameDoc.createElement('div');
+		header.id = 'mfs-c-editor-header';
+		header.innerHTML = `<div id="mfs-c-editor-cmd">[<span id="mfs-c-editor-save">Save</span>] [<span id="mfs-c-editor-close">Close</span>]</div>
+		  <span id="mfs-c-editor-title">${settings.title}</span>`;
+		  
+		frameDoc.body.appendChild(header);
+		frameDoc.body.appendChild(editor);
+		
+		header.querySelector('#mfs-c-editor-save').addEventListener('click', () => { settings.setter(editor.value) });
+		header.querySelector('#mfs-c-editor-close').addEventListener('click', () => { mfs.c.showEditor({close:true}) });
+	}
+}
+
 // PRINT ROUTINE
 // s: the string to print
 // type: see the var typedef below
@@ -544,9 +598,11 @@ mfs.c.print = function(str, type, options = {}) {
 	if (options.clearLastLine) {
 		mfs.c.output.lastElementChild.remove();
 	}
+	// if only clear last line with no string, don't print anything
+	//if (options.clearLastLine && str.length === 0) return;
 	
 	// setup output element
-	if (options.append) {o
+	if (options.append) {
 		oel = mfs.c.output.lastElementChild;
 	} else {
 		oel = document.createElement('span');
@@ -570,8 +626,8 @@ mfs.c.print = function(str, type, options = {}) {
 	// scroll to element (FF only!)
 	oel.scrollIntoView();
 	
-	if ( mfs.c.util.isGlobalPoster && mfs.c.util.isGlobalPoster() && !options.fromGlobal ) {
-		console.log('adding item to printcache here...')
+	if ( mfs.c.util && mfs.c.util.isGlobalPoster && mfs.c.util.isGlobalPoster() && !options.fromGlobal ) {
+		//console.log('adding item to printcache here...')
 		var now = new Date(),
 			jsonow = now.toJSON(),
 			data = {
@@ -581,7 +637,7 @@ mfs.c.print = function(str, type, options = {}) {
 				"htmlescape": htmlescape
 			};
 		mfs.c.state.printcache.push(data);
-		console.log(mfs.c.state.printcache);
+		//console.log(mfs.c.state.printcache);
 	}
 };
 
@@ -694,6 +750,30 @@ mfs.c.globalSetup = function (val = false) {
 	
 }
 
+// toggles visibility of the console, as well as taking focus on and off it
+mfs.c.toggle = function(visible) {
+	// if not set, invert
+	if (visible === undefined) visible = !mfs.c.state.visible;
+	// convert value to boolean, then assign to state
+	mfs.c.state.visible = !!visible;
+	mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
+	if (visible) {
+		mfs.c.input.focus();
+	} else {
+		mfs.c.input.blur();
+		
+		// all these to get focus back to parent
+		var meh = document.createElement('input');
+		meh.style.visible = "hidden";
+		meh.style.position = "fixed"; // prevent page scrolling to bottom on focus
+		document.body.appendChild(meh);
+		parent.focus();
+		meh.focus();
+		meh.blur();
+		document.body.removeChild(meh);
+	}
+}
+
 // MAIN INITIALIZATION ROUTINE
 mfs.c.init = function () {
 	const c = mfs.c;
@@ -734,23 +814,12 @@ mfs.c.init = function () {
 		
 		// add keypress event listener to the iframe
 		c.frame.contentWindow.addEventListener('keypress', function consoleKeypress(e) {
-			// check if toggle key is pressed
-			if (e.key === c.state.togglekey && e.ctrlKey == false) {
+			// common routines to hide the console
+			if (mfs.c.state.editor) {
+				return;
+			} else if ( mfs.c.util.objMatch(e, mfs.c.state.toggleKey, false) ) { // check if toggle key is pressed
 				e.preventDefault();
-				
-				c.state.visible = !c.state.visible;
-				c.container.style.display = (c.state.visible) ? "block" : "none";
-				c.input.blur();
-				
-				// all these to get focus back to parent
-				var meh = document.createElement('input');
-				meh.style.visible = "hidden";
-				meh.style.position = "fixed"; // prevent page scrolling to bottom on focus
-				document.body.appendChild(meh);
-				parent.focus();
-				meh.focus();
-				meh.blur();
-				document.body.removeChild(meh);
+				mfs.c.toggle(false);
 			}
 
 			// now check if user presses enter
@@ -758,8 +827,10 @@ mfs.c.init = function () {
 			if (e.key == "Enter" || e.key == "Return") {
 				c.parse(c.input.value);
 				c.input.value = "";
+				if (mfs.c.state.promptCmd) setTimeout( () => {mfs.c.toggle(false)} , mfs.c.state.promptCmdTimeout || 2000);
 			} else if (e.key == "Escape") {
 				c.input.value = "";
+				if (mfs.c.state.promptCmd) setTimeout( () => {mfs.c.toggle(false)} , mfs.c.state.promptCmdTimeout || 2000);				
 			}
 		});
 		
@@ -780,8 +851,17 @@ mfs.c.init = function () {
 		
 		c.print([c.state.title, c.state.ver].join(' '));
 		c.cmd.time({});
+		
 		// run autoexec
-		var autoexec = GM_getValue('autoexec') || GM_getResourceText('autoexec');
+		let autoexec;
+		if (c.vars.autoexec_src === 'value') {
+			autoexec = GM_getValue('autoexec') || GM_getResourceText('autoexec');
+		} else if (c.vars.autoexec_src === 'resource') {
+			autoexec = GM_getResourceText('autoexec');
+		} else {
+			// defaults to resourcetext
+			autoexec = GM_getResourceText('autoexec');
+		}
 		if (autoexec) c.parseTimedBatch(autoexec);
 		
 		c.state.loaded = true;
@@ -802,11 +882,15 @@ mfs.c.init = function () {
 
 // listen for toggle key on parent page
 document.addEventListener('keypress', function pageKeypress(e) {
-	if (e.key !== mfs.c.state.togglekey || e.ctrlKey) {
+	//if (e.key !== mfs.c.state.togglekey || e.ctrlKey) {
+	let matchFn = mfs.c.util.objMatch;
+	let toggleKey = mfs.c.state.toggleKey;
+	let promptKey = mfs.c.state.promptKey;
+	if ( !matchFn(e, toggleKey, false) && !matchFn(e, promptKey, false) ) {
 		//fires just the togglekey without the ctrl
 		// idk how to make this work :(
-		var raised = new KeyboardEvent('keypress', {key:'`'});
-		document.activeElement.dispatchEvent(raised);
+		//var raised = new KeyboardEvent('keypress', {key:'`'});
+		//document.activeElement.dispatchEvent(raised);
 		return;
 	}
 	e.preventDefault();
@@ -815,10 +899,9 @@ document.addEventListener('keypress', function pageKeypress(e) {
 		mfs.c.init();
 		// mfs.c.parseAddCmds();
 	}
+	mfs.c.state.promptCmd = matchFn(e, promptKey); // whether toggle is by prompt key
 	
-	mfs.c.state.visible = !mfs.c.state.visible;
-	mfs.c.container.style.display = (mfs.c.state.visible) ? "block" : "none";
-	if(mfs.c.state.visible) mfs.c.input.focus();
+	mfs.c.toggle();
 });
 
 if (mfs.c.vars.initOnPageLoad) mfs.c.init();

@@ -71,8 +71,8 @@ mfs.c.util.htmlLink = function(uri, s) {
 
 // parse Markdown
 mfs.c.util.markdown = function(s) {
-	return s.replace(/\[([^\]]*)\]\(cmd:([^\)]*)\)/g, '<span class="cmd" data-cmd="$2" title="command: $2">$1</span>') //command
-			.replace(/\[([^\]]*)\]\(([^\)]*)\)/g, '<a href="$2" target="_blank">$1</a>') // link
+	return s.replace(/\[([^\[\]]*)\]\(cmd:([^\)]*)\)/g, '<span class="cmd" data-cmd="$2" title="command: $2">$1</span>') //command
+			.replace(/\[([^\[\]]*)\]\(([^\)]*)\)/g, '<a href="$2" target="_blank">$1</a>') // link
 			.replace(/\b_([^_]*)_\b/g, '<i>$1</i>') // italics
 			.replace(/\*\b([^\*]*)\b\*/g, '<b>$1</b>'); // bold
 }
@@ -249,6 +249,8 @@ mfs.c.util.isGlobalPoster = function() {
 	return ( mfs.c.vars.global && GM_getValue('globalPosterRef',null)===location.href );
 }
 
+
+
 // WIP
 //mfs.c.util.download = function(dataURL) { }
 
@@ -274,6 +276,18 @@ mfs.c.util.delayedResolve = function(duration, value) {
     }, duration);
   });
 };
+
+// given two objects, see if object one has all the properties and values of object two
+
+
+mfs.c.util.objMatch = function(searchObj, matchObj, own) {
+	for (let key in matchObj) {
+		if ( (own)? !searchObj.hasOwnProperty(key): false || searchObj[key] != matchObj[key]) {
+			return false;
+		}
+	}
+	return true;
+}
 
 // parse dot notation
 mfs.c.util.dotGetValue = function (obj, str, own) {
