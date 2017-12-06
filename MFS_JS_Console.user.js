@@ -47,7 +47,7 @@ function GM_getResourceText() {}
 //GM_deleteValue('aliases');
 
 //namespaces
-mfs = mfs || {};
+mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 
 // private states
@@ -628,7 +628,7 @@ mfs.c.print = function(str, type, options = {}) {
 			oel.innerHTML += `<a href="${line}" title="${line}" target="_blank"><img src="${line}"></a>`
 		} else { 
 			// normal output
-			oel.innerHTML += line + (i==0) ? '' : '<br>' 
+			oel.innerHTML += line + ((i==0) ? '' : '<br>');
 		}
 	}
 	mfs.c.output.appendChild(oel);
@@ -712,7 +712,7 @@ mfs.c.isGlobalPoster = () => mfs.c.vars.global && GM_getValue('globalPosterRef',
 // globalSetup should have authority to assign mfs.c.vars to this property
 // todo: sort out push/pop with this
 Object.defineProperty(mfs.c, 'globalVars', { 
-	get: JSON.parse(GM_getValue('globalVars') || null),
+	get: () => JSON.parse(GM_getValue('globalVars') || null),
 	set: (val) => GM_setValue(JSON.stringify(val))
 });
 
