@@ -1,5 +1,5 @@
 //namespaces
-var mfs = this.mfs || {};
+mfs = mfs || {};
 mfs.c = mfs.c || {};
 
 // UTILITY FUNCTIONS
@@ -47,6 +47,7 @@ mfs.c.util.txtfmt2 = function(s, obj) { // formats text, but with named argument
 }
 mfs.c.util.textFormatter = function(s, obj) {mfs.c.util.txtfmt2(s, obj)}
 
+// i frankly don't know what this is or how it works
 mfs.c.util.typeEscape = function(s) {
 	var map = {
 		b: '\b',
@@ -60,16 +61,16 @@ mfs.c.util.typeEscape = function(s) {
 		'"': '\"',
 		'\\': '',
 	}
-	return s.replace(/\\([\\'"])/g, '$1').replace(/\\([bfnrtv0])/g, function typeEscapemMappedReplace(m, p1) {return map[p1]} )
+	return s.replace(/\\([\\'"])/g, '$1').replace(/\\([bfnrtv0])/g, (m, p1) => map[p1] );
 }
 
 // returns html fragment text of anchor tag
-mfs.c.util.htmlLink = function(uri, s) {
-	if(typeof s=='undefined'){s=uri;}
-	return `<a href="${uri}" target="_blank">${s}</a>`;
+mfs.c.util.htmlLink = function(uri, s, title) {
+	if (typeof s == 'undefined') s = uri;
+	return `<a href="${uri}" target="_blank" title="${title}">${s}</a>`;
 };
 
-// parse Markdown
+// parse [partial] Markdown
 mfs.c.util.markdown = function(s) {
 	return s.replace(/\[([^\[\]]*)\]\(cmd:([^\)]*)\)/g, '<span class="cmd" data-cmd="$2" title="command: $2">$1</span>') //command
 			.replace(/\[([^\[\]]*)\]\(([^\)]*)\)/g, '<a href="$2" target="_blank">$1</a>') // link
@@ -77,6 +78,24 @@ mfs.c.util.markdown = function(s) {
 			.replace(/\*\b([^\*]*)\b\*/g, '<b>$1</b>'); // bold
 }
 
+// https://stackoverflow.com/a/15479354
+mfs.c.util.naturalCompare = function(a, b) {
+    var ax = [], bx = [];
+
+    a.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { ax.push([$1 || Infinity, $2 || ""]) });
+    b.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { bx.push([$1 || Infinity, $2 || ""]) });
+
+    while(ax.length && bx.length) {
+        var an = ax.shift();
+        var bn = bx.shift();
+        var nn = (an[0] - bn[0]) || an[1].localeCompare(bn[1]);
+        if (nn) return nn;
+    }
+
+    return ax.length - bx.length;
+}
+
+// string goes in, a hash comes out
 mfs.c.util.hashCode = function(s) {
   var hash = 0, i, chr;
   if (s.length === 0) return hash;
@@ -93,31 +112,38 @@ mfs.c.util.hashCode = function(s) {
 //   this fn checks the outputvar or o keyvalue of the object
 // s: value to output
 // type: print type
+// formatter: function that formats s to a printable output
 //
 // TODO: add support for array
-mfs.c.util.outputVarOrPrint = function(argObj, s, type) {
-	let varname = argObj.outputvar || argObj.o;
-	//let arraynamepattern = varname.replace(/\[\]$/, "[$1]");
-	let isArray = Array.isArray(s);
+mfs.c.util.outputVarOrPrint = function(argObj, s, type, formatter) {
+	const isArray = Array.isArray(s);
+	// get the varname
+	let varName = argObj.outputvar || argObj.o;
+	// for object notation support, figures out where to output
+	let varRef = mfs.c.util.objectNotationValue(mfs.c.vars, varName, true, true);
 	
-	if (varname && isArray) { mfs.c.vars[varname] = /*JSON.stringify(s)*/s } 
-	else if (varname) { mfs.c.vars[varname] = s }
+	// outputvar specified and s is array -> directly assign (used to be JSON-stringified)
+	if (varName && isArray) { varRef.obj[varRef.key] = s }
+	
+	// outputvar specified and s is NOT array -> directly assign
+	else if (varName) { varRef.obj[varRef.key] = s }
+	
+	// outputvar NOT spefified, formatter exist -> print formatter's output
+	else if (typeof formatter === 'function') { mfs.c.print(formatter(s), type) }
+	
+	// outputvar NOT spefified, formatter NON-exist -> print s directly
 	else { mfs.c.print(s, type) }
-}
-
-// var getter w/support for JSON parsing
-mfs.c.util.getVar = function(name) {
-	let varStr = mfs.c.vars[name];
-	return JSON.parse(varStr || null) || undefined;
 }
 
 // a dumb ajax async fn. returns response regardless
 // callback is responsible to handle any errors
 mfs.c.util.ajax = function (url, callback, argObj = {}) {
+	const proxify = (url) => `http://whateverorigin.org/get?url=${encodeURIComponent(url)}`;
+	
 	// check callback
 	if (typeof callback !== 'function') {
 		console.log('ERROR: callback not a function');
-		return
+		return;
 	}
 	
 	let largObj = Object.assign({}, argObj);
@@ -132,11 +158,7 @@ mfs.c.util.ajax = function (url, callback, argObj = {}) {
 		largObj.onerror = function () {console.log('error')};
 		GM_xmlhttpRequest(largObj);
 	} else if (mfs.c.vars.ajaxUseWhateverOrigin) { // Use the WhateverOrigin.org site
-		let encodedUrl = encodeURIComponent(url);
-		let newUrl = `http://whateverorigin.org/get?url=${encodedUrl}`;
-		//url = 'http://whateverorigin.org/get?url=' + ;
-		//mfs.c.util.jsonp(url, callback)
-		mfs.c.util.jsonp(newUrl, callback)
+		mfs.c.util.jsonp(proxify(url), callback)
 	} else { // standard method
 		console.log('Standard xhr');
 		var xhr = new XMLHttpRequest();
@@ -150,6 +172,7 @@ mfs.c.util.ajax = function (url, callback, argObj = {}) {
 		console.log('Standard xhr sent');
 	}
 };
+
 // http://stackoverflow.com/a/13230363
 mfs.c.util.jsonp = function(url, cb) {
     var script = document.createElement('script');
@@ -174,7 +197,7 @@ mfs.c.util.jsonp = function(url, cb) {
 // is this the shared form of listlink?
 mfs.c.util.urlFilter = function(urlList, argObj) {
 	var out = [];
-	for (var i=0; i<urlList.length; i++) {
+	for (var i = 0; i < urlList.length; i++) {
 		
 	}
 }
@@ -235,7 +258,7 @@ mfs.c.util.processImgDlQueue = function() {
 		if(mfs.c.state.imgDlQueue.length<=1) { // no more img to process
 			mfs.c.state.imgDlQueue=[];
 			mfs.c.state.imgDlTimeoutID=0;
-			mfs.c.print('Finished images in download queue',3);
+			mfs.c.print('Finished images in download queue', 3);
 		} else { // continue, call this fn again using the timeout
 			mfs.c.state.imgDlQueue.shift();
 			var delay = mfs.c.vars.imgDlDelay || 10;
@@ -245,8 +268,7 @@ mfs.c.util.processImgDlQueue = function() {
 };
 
 mfs.c.util.isGlobalPoster = function() {
-	//console.log('isGlobalPoster is called', mfs.c.vars.global, GM_getValue('globalPosterRef',null));
-	return ( mfs.c.vars.global && GM_getValue('globalPosterRef',null)===location.href );
+	return ( mfs.c.vars.global && GM_getValue('globalPosterRef', null) === location.href );
 }
 
 
@@ -303,6 +325,11 @@ mfs.c.util.dotGetValue = function (obj, str, own) {
 	return cur;
 }
 
+// Given a base object and a object notation string, attempt to get the value or a reference to the property
+//  obj: base object
+//  str: the string of the object notation to get value to/ref of within obj
+//  own: check each object's hasOwnProperty
+//  ref: if true returns a reference object (more info inside the function block), otherwise return the prop's value
 mfs.c.util.objectNotationValue = function (obj, str, own, ref) {
 	const pattern = /(?:(?:^|\b|\.)(\w+)(?:\b)|\[(['"]?)(.*?)\2\])/g;
 	const mStr = (match) => match[3] || match[1];
@@ -327,27 +354,4 @@ mfs.c.util.objectNotationValue = function (obj, str, own, ref) {
 		}
 	}
 	return (ref)? refObj : cur;
-}
-
-mfs.c.util.displayElementAttr = function(val, attrlist) {
-	if (val) {
-		document.addEventListener('mouseenter', function(e, attrlist){
-			
-		})
-		return true;
-	} else {
-		
-		return false;
-	}
-}
-mfs.c.util._displayElementAttrEvent = function(e, attrlist) {
-	var s, list;
-	list.push(e.target.localName);
-	for (var i=0; i<attrlist.length; i++) {
-		s = attrlist[i] + ": "; // attr name
-		s = s + (attrlist[i]==='innerText') ? e.target.innerText : e.target.getAttribute(attrlist[i]);
-		list.push(s);
-	}
-	e.stopPropagation();
-	return list.join('\n');
 }

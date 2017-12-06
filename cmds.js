@@ -1,5 +1,5 @@
 // BUILT-IN COMMANDS
-var mfs = this.mfs || {};
+mfs = mfs || {};
 mfs.c = mfs.c || {};
 mfs.c.cmd = mfs.c.cmd||{};
 
@@ -26,14 +26,14 @@ mfs.c.cmd.autoexec = function(argObj) {
 			mfs.c.vars.autoexec_src = argObj[1];
 			mfs.c.print(`Set source to "${argObj[1]}". Execute savevar to take effect.`, 'info');
 		} else {
-			mfs.c.print('Invalid value for "source". valid values are "resource" and "value"', 'warn');
+			mfs.c.print(`Invalid value for "source". valid values: ${srcValues.join(" ")}`, 'warn');
 		}
 	}
 };
 
 // TIME command
 // arguments:
-//  ISO 
+//  ISO/iso: 
 mfs.c.cmd.time = function(argObj) {
 	var now = new Date();
 	var s;
@@ -57,14 +57,20 @@ mfs.c.cmd.time = function(argObj) {
 mfs.c.cmd.listimg = function(args) {
 	let outToVar = !!(args.outputvar || args.o || false);
 	// main function, called as callback to ajax later in this fn
-	let listimgCallback = function(docObj, args) {
+	const listimgCallback = function(docObj, args) {
 		let o = [];
 		let domlist = docObj.getElementsByTagName('img');
 		let imgarray = [].slice.call(domlist);
-		for(let i = 0, c = 1; i < imgarray.length; i++) {	
+		
+		// iterate the image array
+		//  i: array iterator
+		//  c: filtered image counter (starts at 1)
+		for (let i = 0, c = 1; i < imgarray.length; i++) {
+			
 			//filter properties
 			if (imgarray[i].width < args.w || imgarray[i].width > args.W) continue;
 			if (imgarray[i].height < args.h || imgarray[i].height > args.H) continue;
+			// everything below has passed the filter
 			
 			var src = imgarray[i].dataset.src || imgarray[i].src; //lazyload support
 			var s = mfs.c.state.regex.filename.exec(src);
@@ -75,10 +81,8 @@ mfs.c.cmd.listimg = function(args) {
 			if (outToVar) {
 				o.push(src);
 			} else if (args.thumb) {
-				//o.push('<span class="lnoutput mfs-c-gallery">' +(c)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank"><img src="' +src+ '" style="max-width:150px"/></a></span>');
-				o.push(`<span class="lnoutput mfs-c-gallery">${c}: <a href="${src}" title="${src}" target="_blank"><img src="${src}" style="max-width:150px"/></a></span>`);
+				o.push(`<span class="lnoutput mfs-c-gallery">${c}: <a href="${src}" title="${src}" target="_blank"><img src="${src}"  style="max-width:150px"/></a></span>`);
 			} else {
-				//o.push('<span class="lnoutput normal">' +(c)+ ': <a href="' +src+ '" title="' +src+ '" target="_blank">' +s+ '</a>' +dims+ '</span>');
 				o.push(`<span class="lnoutput normal">${c}: <a href="${src}" title="${src}" target="_blank">${s}</a>${dims}</span>`);
 			}
 			c++;

@@ -3,7 +3,7 @@
 // @namespace   mfaizsyahmi
 // @description Adds a little CLI on pages, interpreting my home-brewn MFScript
 // @include     *
-// @version     0.7.0
+// @version     0.7.1
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       GM_deleteValue
@@ -47,7 +47,7 @@ function GM_getResourceText() {}
 //GM_deleteValue('aliases');
 
 //namespaces
-var mfs = this.mfs || {};
+mfs = mfs || {};
 mfs.c = mfs.c || {};
 
 // private states
@@ -55,7 +55,7 @@ mfs.c.state = { /*mfs.c.state ||*/
 	init		: false, // initialized?
 	visible		: false,
 	title		: GM_info.script.name || 'MFScript Console',
-	ver			: GM_info.script.version || 'v0.7.0',
+	ver			: GM_info.script.version || 'v0.7.1',
 	infoURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/',
 	helpURL		: 'https://github.com/mfaizsyahmi/mfs-js-console/wiki/Commands',
 	toggleKey   : {key: '`', altKey: false },
@@ -354,7 +354,7 @@ mfs.c.processParseQueue = function () {
 	// trying out synchronous parsing of the queue, to get "for" to work correctly
 	mfs.c.state.parsingQueue = true;
 	while (mfs.c.state.parseQueue.length) {
-		console.log('Current Parse Queue: \n\n' + mfs.c.state.parseQueue.join('\n'))
+		// console.log('Current Parse Queue: \n\n' + mfs.c.state.parseQueue.join('\n'))
 		// note: parse can push alias commands into queue
 		try {
 			mfs.c.parse(mfs.c.state.parseQueue[0], true);
@@ -562,6 +562,7 @@ mfs.c.showEditor = function(options = {}) {
 //   parseMarkdown: parses partial markdown syntax
 //   clearLastLine: replaces last line with this
 //   append: append to last line
+//   lineNumber: put line numbers
 mfs.c.print = function(str, type, options = {}) {
 	const typedef = { // type definition
 		0: 'normal',
@@ -581,6 +582,7 @@ mfs.c.print = function(str, type, options = {}) {
 		warning: 'warn',
 		error: 'error',
 		important: 'important',
+		gallery : 'mfs-c-gallery',
 		debug: 'debug'
 	};
 	var blackliststr = mfs.c.vars.blacklist || "";
@@ -612,22 +614,30 @@ mfs.c.print = function(str, type, options = {}) {
 	}
 	
 	lines = str.replace(/\t/g,'    ').split('\n');
-	if (options.htmlEscape) {
-		for (let line of lines) {
+	for (let i = 0; i < lines.length; i++) {
+		let line = lines[i];
+		if (options.lineNumber) line = `${i}: ${line}`;
+		if (options.htmlEscape) {
 			for (let blacklistItem of blacklist) {
 				line = line.replace(blacklistItem, "¦".repeat(blacklistItem.length) );
 			}
 			oel.appendChild(document.createTextNode(line));
 			oel.appendChild(document.createElement('br'));
+		} else if (stype === 'mfs-c-gallery') {
+			// NOTE: line must consist of only the URL for this
+			oel.innerHTML += `<a href="${line}" title="${line}" target="_blank"><img src="${line}"></a>`
+		} else { 
+			// normal output
+			oel.innerHTML += line + (i==0) ? '' : '<br>' 
 		}
-	} else { oel.innerHTML += lines.join('<br/>'); }
+	}
 	mfs.c.output.appendChild(oel);
 	
 	// scroll to element (FF only!)
 	oel.scrollIntoView();
 	
-	if ( mfs.c.util && mfs.c.util.isGlobalPoster && mfs.c.util.isGlobalPoster() && !options.fromGlobal ) {
-		//console.log('adding item to printcache here...')
+	if ( mfs.c.isGlobalPoster() && !options.fromGlobal ) {
+		// adding item to printcache here...
 		var now = new Date(),
 			jsonow = now.toJSON(),
 			data = {
@@ -695,24 +705,37 @@ mfs.c.registerAddCommand = function(obj) {
 
 
 // GLOBAL system
+// check if we're the global poster
+mfs.c.isGlobalPoster = () => mfs.c.vars.global && GM_getValue('globalPosterRef', null) === location.href;
+
+// a global var property for use with global mode
+// globalSetup should have authority to assign mfs.c.vars to this property
+// todo: sort out push/pop with this
+Object.defineProperty(mfs.c, 'globalVars', { 
+	get: JSON.parse(GM_getValue('globalVars') || null),
+	set: (val) => GM_setValue(JSON.stringify(val))
+});
+
+// sets focus on this page
 mfs.c.globalFocus = function () {
-	// on focus, set the global poster ref, and get the stored printcache
-	if ( mfs.c.vars.global && document.visibilityState === 'visible') {
-		GM_setValue('globalPosterRef', location.href);
-		mfs.c.state.printcache = JSON.parse(GM_getValue('printcache','[]'));
-	}
+	if ( !mfs.c.vars.global || document.visibilityState !== 'visible') return;
+	
+	// set the global poster ref, and get the stored printcache
+	GM_setValue('globalPosterRef', location.href);
+	mfs.c.state.printcache = JSON.parse(GM_getValue('printcache','[]'));
 }
 
+// on pages with global mode on this gets run at an interval
 mfs.c.globalInterval = function () {
-	var now = new Date();
-	if (mfs.c.util.isGlobalPoster && mfs.c.util.isGlobalPoster()) { // is poster?
+	const now = new Date();
+	if ( mfs.c.isGlobalPoster() ) { // is poster?
 		var activecache = mfs.c.state.printcache || [];
 		
 		// poster is in charge of clearing the print cache
 		for (var i = activecache.length - 1; i >= 0; i--) {
 			var printtime = new Date(activecache[i].time)
 			if (now - printtime > 10000) { // past 10 seconds
-				activecache.splice(i,1); // remove
+				activecache.splice(i, 1); // remove
 			}
 		}
 		GM_setValue('printcache', JSON.stringify(activecache) );
@@ -729,22 +752,24 @@ mfs.c.globalInterval = function () {
 				owncache.push(data);
 			}
 		}
-		//console.log(location.href, listencache);
 	}
 }
 
+// sets the global mode on/off
 mfs.c.globalSetup = function (val = false) {
 	const onVisChangeFn = () => { mfs.c.globalFocus() };
 	
 	if (val) {
 		// listen for focus
 		document.addEventListener('visibilitychange', onVisChangeFn );
-		mfs.c.globalIntervalID = setInterval( () => { mfs.c.globalInterval() }, Number(mfs.c.vars.globalInterval)||1000 );
+		mfs.c.globalIntervalID = setInterval( () => { mfs.c.globalInterval() }, Number(mfs.c.vars.globalInterval) || 1000 );
 		mfs.c.globalFocus(); // assume page that runs this is in focus
+		// mfs.c.vars = mfs.c.globalVars;
 		mfs.c.print('Global mode enabled', 3);
 	} else {
 		document.removeEventListener('visibilitychange', onVisChangeFn );
 		clearInterval(mfs.c.globalIntervalID);
+		// mfs.c.vars = mfs.c.varStack[mfs.c.varStack.length - 1];
 		mfs.c.print('Global mode disabled', 3);
 	}
 	
