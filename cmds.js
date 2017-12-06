@@ -1,5 +1,5 @@
 // BUILT-IN COMMANDS
-mfs = mfs || {};
+mfs = this.mfs || {};
 mfs.c = mfs.c || {};
 mfs.c.cmd = mfs.c.cmd||{};
 

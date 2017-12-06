@@ -628,7 +628,7 @@ mfs.c.print = function(str, type, options = {}) {
 			oel.innerHTML += `<a href="${line}" title="${line}" target="_blank"><img src="${line}"></a>`
 		} else { 
 			// normal output
-			oel.innerHTML += line + ((i==0) ? '' : '<br>');
+			oel.innerHTML += line + '<br>';
 		}
 	}
 	mfs.c.output.appendChild(oel);
